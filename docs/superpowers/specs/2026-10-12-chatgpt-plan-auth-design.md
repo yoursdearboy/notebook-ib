@@ -2,24 +2,24 @@
 
 ## Purpose and agreed scope
 
-Update the local document RAG CLI so `ask` can use an eligible ChatGPT plan for answer generation through the official Sign in with ChatGPT flow. On first use without credentials, `ask` starts browser sign-in automatically. Later invocations reuse and refresh the saved session. The user selected a local credential file and the `gpt-6-luna` default model; `ask --model` overrides that default.
+Update the local document RAG CLI so `ask` supports Google Gemini and OpenAI Responses API generation through Sign in with ChatGPT. The user must select a provider explicitly with `--provider {google,openai}`. `--model` selects a model for that provider; when omitted, Google uses the existing `GOOGLE_CHAT_MODEL` default and OpenAI uses `gpt-6-luna`. For OpenAI, the first generation without credentials starts browser sign-in automatically, and later invocations reuse and refresh the saved session. The user selected a local credential file.
 
 The change is limited to answer generation. Existing document indexing, Google or local embeddings, PostgreSQL storage, retrieval, citations, and output remain intact. The initial version supports one saved ChatGPT account and does not add account switching or a logout command.
 
 ## Existing context
 
-The current CLI implements `index` and `ask` in `main.py`. `ask` checks index compatibility, creates a Google Gemini chat model using `GOOGLE_API_KEY`, then invokes the existing retrieve-then-generate graph. Embeddings are independently configured and may be local or Google-backed. The graph already skips generation when retrieval returns no documents and validates numeric citations against retrieved references.
+The current CLI implements `index` and `ask` in `main.py`. `ask` checks index compatibility, requires `GOOGLE_API_KEY`, creates a Google Gemini chat model using `GOOGLE_CHAT_MODEL`, then invokes the existing retrieve-then-generate graph. Embeddings are independently configured and may be local or Google-backed. The graph already skips generation when retrieval returns no documents and validates numeric citations against retrieved references.
 
 ## Components and interfaces
 
-- `main.py`: Add `ask --model`, defaulting to `gpt-6-luna`. Remove the requirement for `GOOGLE_API_KEY` from answer generation. Preserve the key for Google embedding configuration.
+- `main.py`: Require `ask --provider {google,openai}`. Add `ask --model`; default the model according to the selected provider (`GOOGLE_CHAT_MODEL` for Google, `gpt-6-luna` for OpenAI). Require `GOOGLE_API_KEY` only when Google is selected for generation or embeddings.
 - `chatgpt_auth.py`: Own Sign in with ChatGPT authorization, loopback callback handling, token exchange and refresh, ID-token validation, and local credential persistence. Expose a small interface for obtaining a valid access token for the one saved account.
-- `chatgpt_model.py`: Adapt the existing RAG prompt to the OpenAI Responses API, obtain an access token only when generation is invoked, stream the response, and return normalized text to the graph.
-- `README.md` and `.env.example`: Document ChatGPT sign-in and the `--model` flag, remove answer-generation setup requirements for a Google API key, and clarify that a Google key is still required for Google embeddings.
+- `chatgpt_model.py`: Adapt the existing RAG prompt to the OpenAI Responses API, obtain an access token only when generation is invoked, stream the response, and return normalized text to the graph. Preserve the existing Google chat-model factory for the Google provider.
+- `README.md` and `.env.example`: Document explicit provider selection, provider/model combinations, ChatGPT sign-in, and provider-specific Google API-key requirements.
 
 ## Sign-in and credential lifecycle
 
-When generation is needed and there is no usable session, the CLI starts a loopback listener bound to `127.0.0.1`, opens the system browser, and completes the authorization-code flow with PKCE (S256). Each attempt uses fresh cryptographically random `state`, OIDC `nonce`, and PKCE verifier values. The exact loopback redirect URI is used for both authorization and code exchange. The callback path and host are validated; mismatched state, OAuth errors, malformed callbacks, or unexpected client IDs fail closed.
+Only the OpenAI provider uses this flow. When OpenAI generation is needed and there is no usable session, the CLI starts a loopback listener bound to `127.0.0.1`, opens the system browser, and completes the authorization-code flow with PKCE (S256). Each attempt uses fresh cryptographically random `state`, OIDC `nonce`, and PKCE verifier values. The exact loopback redirect URI is used for both authorization and code exchange. The callback path and host are validated; mismatched state, OAuth errors, malformed callbacks, or unexpected client IDs fail closed. Selecting Google does not read, create, or refresh ChatGPT credentials.
 
 For initial dynamic registration, use `client_id=dynamic_agent_client`, the app name `notebook-ib` as `agent_name_hint`, and a stable opaque `ext_agent_host_id`. Request `openid profile email offline_access resource.invoke chatgpt.tokens.use.direct` and resource `https://api.openai.com/v1`. Save the issued client ID returned from registration, not `dynamic_agent_client`. Code exchange uses the issued client ID, verifier, same redirect URI, and resource, without a client secret.
 
@@ -31,15 +31,15 @@ Before expiry, refresh using the issued client ID and saved refresh token. Persi
 
 ## Answer generation and data flow
 
-The graph continues to retrieve first and generate once. The model adapter only requests credentials when its generation call occurs, so an empty retrieval does not open a browser or make an OpenAI request.
+The graph continues to retrieve first and generate once. The selected provider/model pair is passed to the generation factory. The OpenAI model adapter only requests credentials when its generation call occurs, so an empty retrieval does not open a browser or make an OpenAI request.
 
-Send the existing system and user prompt as Responses API input to `https://api.openai.com/v1/responses`, using the access token as a bearer credential. Use the `--model` value, defaulting to `gpt-6-luna`. Set `store=false` and `stream=true` on every inference request. Collect output text deltas only from a successfully completed response; fail on API errors, incomplete/failed responses, empty text, or unsupported response content. Continue applying the existing citation validation and reference rendering without changing the RAG prompt's citation contract.
+For `--provider openai`, send the existing system and user prompt as Responses API input to `https://api.openai.com/v1/responses`, using the access token as a bearer credential. Use the `--model` value, defaulting to `gpt-6-luna`. Set `store=false` and `stream=true` on every inference request. Collect output text deltas only from a successfully completed response; fail on API errors, incomplete/failed responses, empty text, or unsupported response content.
 
-Do not silently fall back to Google or API-key billing if ChatGPT plan access is declined or unavailable. Inference retries must not result in hidden duplicate requests. Provider errors are sanitized before CLI display and logs.
+For `--provider google`, use the existing Gemini integration, `GOOGLE_API_KEY`, and `GOOGLE_CHAT_MODEL` default unless `--model` overrides it. Do not silently switch providers or billing paths if a selected provider fails. Inference retries must not result in hidden duplicate OpenAI requests. Provider errors are sanitized before CLI display and logs. Continue applying the existing citation validation and reference rendering without changing the RAG prompt's citation contract.
 
 ## Error handling and security
 
-Expected failures (browser unavailable, callback rejected, invalid or expired credentials, missing plan-use scope, ineligible account/model, provider refusal, API errors, and network failures) produce actionable errors and a nonzero exit status, never an apparently successful answer. A user who declined plan-use permission is directed to authorize it in ChatGPT and retry. No API key or Codex credential file is read for answer generation.
+Expected failures (missing explicit provider, missing selected-provider credentials, browser unavailable, callback rejected, invalid or expired OpenAI credentials, missing plan-use scope, ineligible account/model, provider refusal, API errors, and network failures) produce actionable errors and a nonzero exit status, never an apparently successful answer. A user who declined plan-use permission is directed to authorize it in ChatGPT and retry. The Google provider uses only its configured Google API key; the OpenAI provider uses only the saved Sign in with ChatGPT credentials, never an API key or Codex credential file.
 
 OAuth authorization and token endpoints use HTTPS. The loopback server validates the callback host/path and state and shuts down after one attempt. Secrets, authorization codes, PKCE material, access/refresh/ID tokens, authorization URLs containing account hints, and raw provider response bodies are excluded from diagnostics. The credential file is replaced atomically with restrictive permissions; refresh serialization protects rotated tokens when multiple CLI processes run concurrently.
 
@@ -47,10 +47,10 @@ OAuth authorization and token endpoints use HTTPS. The loopback server validates
 
 Automated, network-independent tests use fake OAuth and Responses API endpoints and a controlled loopback callback. They cover:
 
-- `ask --model` parsing and the `gpt-6-luna` default.
+- Required `--provider {google,openai}` parsing, provider-specific model defaults, and `--model` overrides for each provider.
 - Authorization parameters, PKCE/state/nonce generation and validation, OAuth denial, issued-client-ID handling, and ID-token signature/claim validation.
 - Missing plan-use scope, invalid callback, refresh success and rotation, refresh failure, atomic credential persistence, file permissions, and concurrent refresh serialization.
-- No sign-in or generation when retrieval is empty; correct Responses API model, bearer token, `store=false`, and streaming behavior; safe handling of incomplete, failed, refused, and empty responses.
+- No sign-in or generation when retrieval is empty; correct provider/model selection; correct OpenAI Responses API bearer token, `store=false`, and streaming behavior; safe handling of incomplete, failed, refused, and empty responses.
 - CLI error categories, cleanup, and diagnostics that do not expose credentials or provider response bodies.
 - Documentation matches the split between ChatGPT answer generation and Google embeddings.
 
@@ -58,9 +58,10 @@ A manual end-to-end check will use the user's eligible ChatGPT account to sign i
 
 ## Success criteria
 
-1. `uv run main.py ask "<question>"` signs in with ChatGPT on first answer generation, reuses saved credentials and refreshes them when needed on later asks, and uses `gpt-6-luna` by default.
-2. `uv run main.py ask --model <model> "<question>"` uses the selected model.
-3. Responses API requests use the authorized bearer token and always set `store=false` and `stream=true`.
-4. Existing indexing, embedding, retrieval, citations, and references continue to work without requiring Google credentials for generation.
-5. Authentication, permission, and provider failures are safe and explicit; no unsupported fallback occurs.
-6. The credential file is private, atomically updated, and never exposed in logs or source control.
+1. Asking requires an explicit provider: `uv run main.py ask --provider openai "<question>"` signs in with ChatGPT on first answer generation, reuses saved credentials and refreshes them when needed, and uses `gpt-6-luna` by default.
+2. `uv run main.py ask --provider google --model <model> "<question>"` and `uv run main.py ask --provider openai --model <model> "<question>"` use the selected provider/model combination.
+3. Google generation continues to use `GOOGLE_API_KEY` and the existing `GOOGLE_CHAT_MODEL` default when `--model` is omitted.
+4. OpenAI Responses API requests use the authorized bearer token and always set `store=false` and `stream=true`.
+5. Existing indexing, embedding, retrieval, citations, and references continue to work; credentials are required only for the selected provider's services.
+6. Authentication, permission, and provider failures are safe and explicit; no unsupported fallback occurs.
+7. The credential file is private, atomically updated, and never exposed in logs or source control.
