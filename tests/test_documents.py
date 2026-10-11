@@ -87,6 +87,8 @@ def test_pdf_chunks_include_one_based_page_numbers(tmp_path: Path) -> None:
 
     assert [chunk.metadata["page"] for chunk in chunks] == [1, 2]
     assert [chunk.page_content.strip() for chunk in chunks] == ["first page fact", "second page fact"]
+    assert [chunk.metadata["chunk_index"] for chunk in chunks] == [0, 1]
+    assert len({chunk.id for chunk in chunks}) == len(chunks)
 
 
 def test_repeated_paragraphs_and_crlf_unicode_keep_occurrence_locations(tmp_path: Path) -> None:
@@ -102,6 +104,19 @@ def test_repeated_paragraphs_and_crlf_unicode_keep_occurrence_locations(tmp_path
     assert second.metadata["line_end"] == 6
     assert "Повтор" in first.page_content and "Повтор" in second.page_content
     assert all(chunk.metadata["source"] == str(source.resolve()) for chunk in chunks)
+
+
+def test_repeated_overlap_uses_the_later_occurrence_for_line_ranges(tmp_path: Path) -> None:
+    source = tmp_path / "overlapping-repeats.txt"
+    content = "\n\naa\n\na\nlonglonglongb \n\nlonglonglong b"
+    source.write_text(content, encoding="utf-8")
+
+    chunks = prepare_chunks(source, config(CHUNK_SIZE="15", CHUNK_OVERLAP="12"))
+    assert [chunk.page_content for chunk in chunks[:2]] == ["\n\naa", "\n\na"]
+    assert [(chunk.metadata["line_start"], chunk.metadata["line_end"]) for chunk in chunks[:2]] == [
+        (1, 3),
+        (3, 5),
+    ]
 
 
 def test_chunk_ids_are_stable_and_change_when_source_changes(tmp_path: Path) -> None:
@@ -182,8 +197,12 @@ def test_invalid_chunk_and_retrieval_settings_are_rejected(overrides: dict[str, 
 
 
 def test_config_repr_does_not_include_secret() -> None:
-    configured = config(GOOGLE_API_KEY="super-secret")
+    configured = config(
+        GOOGLE_API_KEY="super-secret",
+        DATABASE_URL="postgresql+psycopg://rag:db-secret@localhost:6024/rag",
+    )
     assert "super-secret" not in repr(configured)
+    assert "db-secret" not in repr(configured)
 
 
 def test_dotenv_values_do_not_override_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -8,7 +8,8 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from sqlalchemy import create_engine, text
 
-from main import Config, IndexStore, RagError
+from test_documents import make_text_pdf
+from main import Config, IndexStore, RagError, prepare_chunks
 
 
 TEST_DATABASE_URL = os.environ.get("RAG_TEST_DATABASE_URL")
@@ -87,6 +88,24 @@ def test_documents_persist_across_reopen_and_search_preserves_metadata() -> None
     assert results[0].page_content == "blue comet"
     assert results[0].metadata["source"] == "/docs/alpha.txt"
     assert results[0].metadata["line_start"] == 1
+
+
+def test_multipage_pdf_chunks_persist_with_unique_ids(tmp_path) -> None:
+    source = tmp_path / "two-pages.pdf"
+    make_text_pdf(source, ["first page fact", "second page fact"])
+    chunks = prepare_chunks(source, make_config())
+    embeddings = FakeEmbeddings()
+    store = IndexStore(make_config(), embeddings)
+    try:
+        store.initialize()
+        vectors = [embeddings._vector(chunk.page_content) for chunk in chunks]
+        store.replace_source(chunks, vectors)
+        with store._sql_engine.connect() as connection:
+            count = connection.execute(text("SELECT count(*) FROM rag_chunks")).scalar_one()
+    finally:
+        store.close()
+
+    assert count == 2
 
 
 def test_replacing_a_source_removes_chunks_left_from_its_longer_version() -> None:

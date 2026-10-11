@@ -126,6 +126,17 @@ def test_text_content_blocks_are_normalized(tmp_path: Path) -> None:
     assert result["answer"] == "Supported answer [1]"
 
 
+def test_blocked_response_with_partial_text_is_rejected(tmp_path: Path) -> None:
+    store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], [])
+    response = AIMessage(
+        content="Partial answer [1]",
+        response_metadata={"finish_reason": "SAFETY", "safety_ratings": [{"blocked": True}]},
+    )
+
+    with pytest.raises(RagError, match="blocked"):
+        build_graph(store, FakeModel(response), k=1).invoke({"question": "Question?"})
+
+
 def test_render_uses_metadata_locations_and_lists_every_retrieved_chunk(tmp_path: Path) -> None:
     first_path = (tmp_path / "manual.pdf").resolve()
     second_path = (tmp_path / "notes.md").resolve()

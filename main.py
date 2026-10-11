@@ -40,7 +40,9 @@ class Config:
     google_chat_model: str = "gemini-3.7-flash"
     google_embedding_model: str = "gemini-embedding-2-preview"
     embedding_dimension: int = 768
-    database_url: str = "postgresql+psycopg://rag:rag@localhost:6024/rag"
+    database_url: str = field(
+        default="postgresql+psycopg://rag:rag@localhost:6024/rag", repr=False
+    )
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retrieval_k: int = 4
@@ -107,22 +109,31 @@ def _split_signature(config: Config) -> str:
 
 
 def _split_text(text: str, *, source: Path, source_hash: str, signature: str, config: Config,
-                page: int | None = None) -> list[Document]:
+                page: int | None = None, ordinal_start: int = 0) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=config.chunk_size,
         chunk_overlap=config.chunk_overlap,
-        add_start_index=True,
+        add_start_index=False,
         strip_whitespace=False,
     )
     pieces = splitter.create_documents([text])
     chunks: list[Document] = []
     namespace = uuid.NAMESPACE_URL
-    for ordinal, piece in enumerate(pieces):
+    previous_start = -1
+    previous_end = 0
+    for piece in pieces:
         if not piece.page_content.strip():
             continue
-        start = piece.metadata.get("start_index")
-        if not isinstance(start, int) or start < 0 or text[start : start + len(piece.page_content)] != piece.page_content:
+        # Resolve each emitted chunk from the prior source position. LangChain's
+        # start-index lookup searches backward by chunk_overlap and can mistake
+        # an earlier repeated passage for the current chunk.
+        earliest_start = max(previous_start + 1, previous_end - config.chunk_overlap)
+        start = text.find(piece.page_content, earliest_start)
+        if start < 0:
             raise RagError(f"Could not verify source offsets while preparing {source}.")
+        previous_start = start
+        previous_end = start + len(piece.page_content)
+        ordinal = ordinal_start + len(chunks)
         end = start + len(piece.page_content)
         identity = f"{source}\0{source_hash}\0{signature}\0{ordinal}"
         metadata: dict[str, object] = {
@@ -167,7 +178,8 @@ def prepare_chunks(path: Path, config: Config) -> list[Document]:
                     page = int(page_document.metadata["page"]) + 1
                     chunks.extend(
                         _split_text(page_text, source=source, source_hash=source_hash,
-                                    signature=signature, config=config, page=page)
+                                    signature=signature, config=config, page=page,
+                                    ordinal_start=len(chunks))
                     )
         else:
             text = raw.decode("utf-8")
@@ -394,6 +406,22 @@ def create_chat_model(config: Config) -> BaseChatModel:
 
 
 def _normalize_model_content(response: object) -> str:
+    response_metadata = getattr(response, "response_metadata", {})
+    if isinstance(response_metadata, Mapping):
+        finish_reason = response_metadata.get("finish_reason")
+        if isinstance(finish_reason, str) and any(
+            marker in finish_reason.upper() for marker in ("SAFETY", "BLOCK")
+        ):
+            raise RagError("The chat model response was blocked by safety settings.")
+        block_reason = response_metadata.get("block_reason")
+        if block_reason:
+            raise RagError("The chat model response was blocked by safety settings.")
+        safety_ratings = response_metadata.get("safety_ratings", [])
+        if isinstance(safety_ratings, (list, tuple)) and any(
+            isinstance(rating, Mapping) and rating.get("blocked") is True
+            for rating in safety_ratings
+        ):
+            raise RagError("The chat model response was blocked by safety settings.")
     content = response if isinstance(response, str) else getattr(response, "content", None)
     if isinstance(content, str):
         normalized = content
