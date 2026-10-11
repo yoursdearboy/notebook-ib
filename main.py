@@ -8,6 +8,7 @@ import uuid
 import math
 import asyncio
 import argparse
+import logging
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,9 @@ from sqlalchemy.engine import make_url
 from typing_extensions import TypedDict
 
 
+logger = logging.getLogger(__name__)
+
+
 class RagError(Exception):
     """An expected, safe-to-display application error."""
 
@@ -38,48 +42,99 @@ class RagError(Exception):
 class Config:
     google_api_key: str = field(default="", repr=False)
     google_chat_model: str = "gemini-3.7-flash"
-    google_embedding_model: str = "gemini-embedding-2-preview"
-    embedding_dimension: int = 768
+    embedding_provider: str = "huggingface"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dimension: int = 1024
     database_url: str = field(
         default="postgresql+psycopg://rag:rag@localhost:6024/rag", repr=False
     )
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retrieval_k: int = 4
+    pdf_loader: str = "pypdf"
+    pdf_ocr_languages: tuple[str, ...] = ("eng",)
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        pdf_loader: str = "pypdf",
+        pdf_ocr_languages: str = "eng",
+    ) -> Config:
         if environ is None:
             load_dotenv(override=False)
             values: Mapping[str, str] = os.environ
         else:
             values = environ
         try:
+            # Keep existing .env files that set GOOGLE_EMBEDDING_MODEL working,
+            # while new configurations default to local Hugging Face embeddings.
+            embedding_provider = (values.get("EMBEDDING_PROVIDER") or (
+                "google" if "GOOGLE_EMBEDDING_MODEL" in values else "huggingface"
+            )).strip().lower()
+            default_embedding_model = (
+                "gemini-embedding-2-preview"
+                if embedding_provider == "google"
+                else "BAAI/bge-m3"
+            )
+            embedding_model = values.get("EMBEDDING_MODEL") or (
+                values.get("GOOGLE_EMBEDDING_MODEL", default_embedding_model)
+                if embedding_provider == "google"
+                else default_embedding_model
+            )
             configured = cls(
                 google_api_key=values.get("GOOGLE_API_KEY", ""),
                 google_chat_model=values.get("GOOGLE_CHAT_MODEL", "gemini-3.7-flash"),
-                google_embedding_model=values.get(
-                    "GOOGLE_EMBEDDING_MODEL", "gemini-embedding-2-preview"
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                embedding_dimension=int(
+                    values.get(
+                        "EMBEDDING_DIMENSION",
+                        "768" if embedding_provider == "google" else "1024",
+                    )
                 ),
-                embedding_dimension=int(values.get("EMBEDDING_DIMENSION", "768")),
                 database_url=values.get(
                     "DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:6024/rag"
                 ),
                 chunk_size=int(values.get("CHUNK_SIZE", "1000")),
                 chunk_overlap=int(values.get("CHUNK_OVERLAP", "200")),
                 retrieval_k=int(values.get("RETRIEVAL_K", "4")),
+                pdf_loader=pdf_loader.strip().lower(),
+                pdf_ocr_languages=tuple(
+                    language.strip()
+                    for language in pdf_ocr_languages.split(",")
+                    if language.strip()
+                ),
             )
         except (TypeError, ValueError) as exc:
             raise RagError("Configuration values for dimensions and chunk settings must be integers.") from exc
         if configured.embedding_dimension <= 0:
             raise RagError("EMBEDDING_DIMENSION must be positive.")
+        if configured.embedding_provider not in {"google", "huggingface"}:
+            raise RagError("EMBEDDING_PROVIDER must be either 'google' or 'huggingface'.")
+        if not configured.embedding_model.strip():
+            raise RagError("EMBEDDING_MODEL must not be blank.")
         if configured.chunk_size <= 0:
             raise RagError("CHUNK_SIZE must be positive.")
         if not 0 <= configured.chunk_overlap < configured.chunk_size:
             raise RagError("CHUNK_OVERLAP must be at least zero and smaller than CHUNK_SIZE.")
         if configured.retrieval_k <= 0:
             raise RagError("RETRIEVAL_K must be positive.")
+        if configured.pdf_loader not in {"pypdf", "unstructured"}:
+            raise RagError("--pdf-loader must be either 'pypdf' or 'unstructured'.")
+        if not configured.pdf_ocr_languages:
+            raise RagError("--pdf-ocr-languages must contain at least one language code.")
         return configured
+
+    @property
+    def google_embedding_model(self) -> str:
+        """Compatibility alias for callers using the former Google-only setting."""
+        return self.embedding_model
+
+    @property
+    def embedding_model_id(self) -> str:
+        return f"{self.embedding_provider}:{self.embedding_model}"
 
 
 def discover_files(path: Path) -> list[Path]:
@@ -98,14 +153,54 @@ def discover_files(path: Path) -> list[Path]:
     )
 
 
-def _split_signature(config: Config) -> str:
+def _split_signature(config: Config, *, pdf: bool = False) -> str:
     data = {
         "chunk_size": config.chunk_size,
         "chunk_overlap": config.chunk_overlap,
         "splitter": "RecursiveCharacterTextSplitter",
         "version": 1,
     }
+    if pdf:
+        data["pdf_loader"] = config.pdf_loader
+        data["pdf_ocr_languages"] = config.pdf_ocr_languages
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+def _load_pdf_pages(source: Path, config: Config) -> list[Document]:
+    if config.pdf_loader == "pypdf":
+        return PyPDFLoader(str(source)).load()
+
+    try:
+        from langchain_community.document_loaders import UnstructuredPDFLoader
+        elements = UnstructuredPDFLoader(
+            str(source),
+            mode="elements",
+            strategy="auto",
+            languages=list(config.pdf_ocr_languages),
+        ).load()
+    except ImportError as exc:
+        raise RagError(
+            "--pdf-loader unstructured requires the optional PDF OCR dependencies. "
+            "Install them with 'uv sync --extra pdf-ocr'."
+        ) from exc
+    pages: dict[int, list[str]] = {}
+    for element in elements:
+        if not element.page_content.strip():
+            continue
+        try:
+            page = int(element.metadata["page_number"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RagError(
+                f"PDF loader '{config.pdf_loader}' did not provide page numbers for {source}."
+            ) from exc
+        if page < 1:
+            raise RagError(f"PDF loader '{config.pdf_loader}' returned an invalid page for {source}.")
+        pages.setdefault(page, []).append(element.page_content)
+
+    return [
+        Document(page_content="\n\n".join(texts), metadata={"page": page - 1})
+        for page, texts in sorted(pages.items())
+    ]
 
 
 def _split_text(text: str, *, source: Path, source_hash: str, signature: str, config: Config,
@@ -168,9 +263,9 @@ def prepare_chunks(path: Path, config: Config) -> list[Document]:
     try:
         raw = source.read_bytes()
         source_hash = hashlib.sha256(raw).hexdigest()
-        signature = _split_signature(config)
+        signature = _split_signature(config, pdf=source.suffix.lower() == ".pdf")
         if source.suffix.lower() == ".pdf":
-            pages = PyPDFLoader(str(source)).load()
+            pages = _load_pdf_pages(source, config)
             chunks = []
             for page_document in pages:
                 page_text = page_document.page_content
@@ -207,10 +302,12 @@ class IndexStore:
         self._vector_store: PGVectorStore | None = None
         self._closed = False
 
-    def initialize(self) -> None:
+    def initialize(self, fresh: bool = False) -> None:
         try:
             with self._sql_engine.begin() as connection:
                 connection.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": 747291012})
+                if fresh:
+                    connection.execute(sql_text("DROP TABLE IF EXISTS rag_chunks, rag_index_config"))
                 connection.execute(sql_text("CREATE EXTENSION IF NOT EXISTS vector"))
                 connection.execute(
                     sql_text(
@@ -232,7 +329,7 @@ class IndexStore:
                         "INSERT INTO rag_index_config (singleton, embedding_model, embedding_dimension) "
                         "VALUES (TRUE, :model, :dimension) ON CONFLICT (singleton) DO NOTHING"
                     ),
-                    {"model": self.config.google_embedding_model, "dimension": self.config.embedding_dimension},
+                    {"model": self.config.embedding_model_id, "dimension": self.config.embedding_dimension},
                 )
                 row = connection.execute(
                     sql_text("SELECT embedding_model, embedding_dimension FROM rag_index_config WHERE singleton = TRUE")
@@ -244,7 +341,7 @@ class IndexStore:
             raise RagError("Could not initialize the PostgreSQL vector index.") from exc
 
     def _assert_config(self, embedding_model: str, embedding_dimension: int) -> None:
-        if embedding_model != self.config.google_embedding_model or embedding_dimension != self.config.embedding_dimension:
+        if embedding_model != self.config.embedding_model_id or embedding_dimension != self.config.embedding_dimension:
             raise RagError(
                 "The existing index uses an incompatible embedding model or dimension; create a fresh index."
             )
@@ -361,14 +458,25 @@ class RagState(TypedDict, total=False):
 
 
 def create_embeddings(config: Config) -> Embeddings:
+    if config.embedding_provider == "huggingface":
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+
+            return HuggingFaceEmbeddings(model_name=config.embedding_model)
+        except Exception as exc:
+            raise RagError(
+                "Could not load the Hugging Face embedding model; check the model name and local dependencies."
+            ) from exc
+    if config.embedding_provider != "google":
+        raise RagError("EMBEDDING_PROVIDER must be either 'google' or 'huggingface'.")
     if not config.google_api_key:
-        raise RagError("GOOGLE_API_KEY is required to create Google embeddings.")
+        raise RagError("GOOGLE_API_KEY is required when EMBEDDING_PROVIDER=google.")
     try:
         from google import genai
         from google.genai import types as genai_types
 
         embeddings = GoogleGenerativeAIEmbeddings(
-            model=config.google_embedding_model,
+            model=config.embedding_model,
             google_api_key=config.google_api_key,
             vertexai=False,
             output_dimensionality=config.embedding_dimension,
@@ -565,8 +673,7 @@ def _report_error(message: str, config: Config, category: str = "Error") -> None
     print(f"{category}: {_safe_message(message, config)}", file=sys.stderr)
 
 
-def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embeddings) -> int:
-    store.initialize()
+def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embeddings, fresh: bool = False) -> int:
     try:
         files = discover_files(path)
     except RagError as exc:
@@ -575,6 +682,7 @@ def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embedd
     if not files:
         _report_error(f"No supported documents found in {path}.", config)
         return 1
+    store.initialize(fresh=fresh)
     succeeded = 0
     failed = 0
     total_chunks = 0
@@ -587,14 +695,16 @@ def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embedd
             continue
         try:
             vectors = embeddings.embed_documents([chunk.page_content for chunk in chunks])
-        except Exception:
+        except Exception as exc:
             failed += 1
+            logger.error("Embedding failed for %s: %s", source, _safe_message(str(exc), config))
             _report_error(f"Failed {source}: embedding failed; the previous source version was preserved.", config, "Provider error")
             continue
         try:
             store.replace_source(chunks, vectors)
-        except Exception:
+        except Exception as exc:
             failed += 1
+            logger.error("Database replacement failed for %s: %s", source, _safe_message(str(exc), config))
             _report_error(f"Failed {source}: database replacement failed; the previous source version was preserved.", config, "Database error")
             continue
         succeeded += 1
@@ -609,6 +719,22 @@ def _create_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     index_parser = commands.add_parser("index", help="Index a file or recursively scan a directory")
     index_parser.add_argument("path", type=Path, help="Text, Markdown, PDF, or directory of supported files")
+    index_parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Delete the existing index before indexing (destructive)",
+    )
+    index_parser.add_argument(
+        "--pdf-loader",
+        choices=("pypdf", "unstructured"),
+        default="pypdf",
+        help="PDF extraction backend (default: pypdf)",
+    )
+    index_parser.add_argument(
+        "--pdf-ocr-languages",
+        default="eng",
+        help="Comma-separated language codes for Unstructured OCR (default: eng)",
+    )
     ask_parser = commands.add_parser("ask", help="Ask a question about indexed documents")
     ask_parser.add_argument("question", help="A standalone question")
     return parser
@@ -620,14 +746,17 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
     try:
-        config = Config.from_env()
+        config = Config.from_env(
+            pdf_loader=getattr(args, "pdf_loader", "pypdf"),
+            pdf_ocr_languages=getattr(args, "pdf_ocr_languages", "eng"),
+        )
     except RagError as exc:
         _report_error(str(exc), Config(), "Configuration error")
         return 1
     if args.command == "ask" and not args.question.strip():
         _report_error("Question must not be blank.", config, "Input error")
         return 2
-    if not config.google_api_key:
+    if args.command == "ask" and not config.google_api_key:
         _report_error("GOOGLE_API_KEY is required.", config, "Configuration error")
         return 1
 
@@ -638,7 +767,7 @@ def main(argv: list[str] | None = None) -> int:
             embeddings = create_embeddings(config)
             stage = "database"
             store = IndexStore(config, embeddings)
-            failures = index_path(args.path, config, store, embeddings)
+            failures = index_path(args.path, config, store, embeddings, fresh=args.fresh)
             return 1 if failures else 0
 
         deferred_embeddings = _DeferredEmbeddings(lambda: create_embeddings(config))

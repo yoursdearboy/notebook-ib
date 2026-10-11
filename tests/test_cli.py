@@ -29,11 +29,13 @@ class FakeStore:
         self.events = events if events is not None else []
         self.closed = False
         self.initialized = False
+        self.fresh = False
         self.replacements: list[tuple[list[Document], list[list[float]]]] = []
         self.documents: list[Document] = []
 
-    def initialize(self) -> None:
+    def initialize(self, fresh: bool = False) -> None:
         self.initialized = True
+        self.fresh = fresh
 
     def check_compatible(self) -> None:
         self.events.append("check-compatible")
@@ -91,7 +93,7 @@ def test_missing_credentials_fails_before_service_factories(
     monkeypatch.setattr(app, "create_chat_model", lambda config: pytest.fail("chat factory called"))
     monkeypatch.setattr(app, "IndexStore", lambda *args: pytest.fail("store created"))
 
-    result = app.main(["index", "missing.txt"])
+    result = app.main(["ask", "What is in the index?"])
 
     assert result == 1
     assert "google_api_key" in capsys.readouterr().err.lower()
@@ -118,6 +120,38 @@ def test_directory_index_continues_after_corrupt_pdf_and_returns_failure(
     assert "bad.pdf" in captured.err
 
 
+def test_fresh_index_recreates_index_before_indexing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch)
+    (tmp_path / "source.txt").write_text("A known fact.\n", encoding="utf-8")
+    store = FakeStore()
+    monkeypatch.setattr(app, "create_embeddings", lambda config: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+
+    result = app.main(["index", "--fresh", str(tmp_path)])
+
+    assert result == 0
+    assert store.initialized
+    assert store.fresh
+    assert len(store.replacements) == 1
+
+
+def test_fresh_index_does_not_delete_existing_index_for_empty_input(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch)
+    store = FakeStore()
+    monkeypatch.setattr(app, "create_embeddings", lambda config: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+
+    result = app.main(["index", "--fresh", str(tmp_path)])
+
+    assert result == 1
+    assert not store.initialized
+    assert "no supported documents" in capsys.readouterr().err.lower()
+
+
 def test_embedding_failure_does_not_replace_existing_source(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
@@ -136,6 +170,36 @@ def test_embedding_failure_does_not_replace_existing_source(
     assert store.replacements == []
     assert store.closed
     assert "embedding" in capsys.readouterr().err.lower()
+
+
+def test_embedding_failure_logs_sanitized_provider_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    secret_key = "provider-secret-key"
+    set_config_env(monkeypatch, GOOGLE_API_KEY=secret_key)
+    source = tmp_path / "failure.txt"
+    source.write_text("Some content.\n", encoding="utf-8")
+    store = FakeStore()
+
+    class FailingEmbeddings(FakeEmbeddings):
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError(f"provider rejected request with key {secret_key}")
+
+    monkeypatch.setattr(app, "create_embeddings", lambda config: FailingEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+
+    result = app.main(["index", str(source)])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "Provider error" in captured.err
+    assert "provider rejected request" not in captured.err
+    assert "provider rejected request" in caplog.text
+    assert secret_key not in caplog.text
+    assert "[redacted]" in caplog.text
 
 
 def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
