@@ -7,9 +7,11 @@ import os
 import uuid
 import math
 import asyncio
+import argparse
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
@@ -24,6 +26,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy import create_engine, text as sql_text
+from sqlalchemy.engine import make_url
 from typing_extensions import TypedDict
 
 
@@ -362,6 +365,7 @@ def create_embeddings(config: Config) -> Embeddings:
         # Use the official client's supported timeout and three total attempts (two retries).
         embeddings.client = genai.Client(
             api_key=config.google_api_key,
+            vertexai=False,
             http_options=genai_types.HttpOptions(
                 timeout=60_000,
                 retry_options=genai_types.HttpRetryOptions(attempts=3),
@@ -490,9 +494,159 @@ def render_result(state: RagState) -> str:
     return answer + "\n\n" + "\n".join(references)
 
 
-def main() -> None:
-    print("Hello from notebook-ib!")
+class _DeferredEmbeddings(Embeddings):
+    """Create the Google client only after the index configuration is checked."""
+
+    def __init__(self, factory: Callable[[], Embeddings]) -> None:
+        self._delegate: Embeddings | None = None
+        self._factory = factory
+
+    def _get_delegate(self) -> Embeddings:
+        delegate = self._delegate
+        if delegate is None:
+            delegate = self._factory()
+            object.__setattr__(self, "_delegate", delegate)
+        return delegate
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._get_delegate().embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._get_delegate().embed_query(text)
+
+
+def _safe_message(message: str, config: Config) -> str:
+    safe = message
+    if config.google_api_key:
+        safe = safe.replace(config.google_api_key, "[redacted]")
+    try:
+        configured_url = make_url(config.database_url)
+        if configured_url.password:
+            hidden_url = configured_url.set(password="[redacted]").render_as_string(hide_password=False)
+            safe = safe.replace(config.database_url, hidden_url)
+    except Exception:
+        pass
+    return re.sub(
+        r"(?i)(postgres(?:ql)?(?:\+[^:/\s]+)?://[^:/@\s]+:)[^@/\s]+(@)",
+        r"\1[redacted]\2",
+        safe,
+    )
+
+
+def _report_error(message: str, config: Config, category: str = "Error") -> None:
+    print(f"{category}: {_safe_message(message, config)}", file=sys.stderr)
+
+
+def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embeddings) -> int:
+    store.initialize()
+    try:
+        files = discover_files(path)
+    except RagError as exc:
+        _report_error(str(exc), config)
+        return 1
+    if not files:
+        _report_error(f"No supported documents found in {path}.", config)
+        return 1
+    succeeded = 0
+    failed = 0
+    total_chunks = 0
+    for source in files:
+        try:
+            chunks = prepare_chunks(source, config)
+        except RagError as exc:
+            failed += 1
+            _report_error(f"Failed {source}: {exc}", config, "File error")
+            continue
+        try:
+            vectors = embeddings.embed_documents([chunk.page_content for chunk in chunks])
+        except Exception:
+            failed += 1
+            _report_error(f"Failed {source}: embedding failed; the previous source version was preserved.", config, "Provider error")
+            continue
+        try:
+            store.replace_source(chunks, vectors)
+        except Exception:
+            failed += 1
+            _report_error(f"Failed {source}: database replacement failed; the previous source version was preserved.", config, "Database error")
+            continue
+        succeeded += 1
+        total_chunks += len(chunks)
+        print(f"Indexed {source}: {len(chunks)} chunks.")
+    print(f"Indexing summary: {succeeded} files succeeded, {failed} failed, {total_chunks} chunks indexed.")
+    return failed
+
+
+def _create_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Index local documents and answer questions with source references.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    index_parser = commands.add_parser("index", help="Index a file or recursively scan a directory")
+    index_parser.add_argument("path", type=Path, help="Text, Markdown, PDF, or directory of supported files")
+    ask_parser = commands.add_parser("ask", help="Ask a question about indexed documents")
+    ask_parser.add_argument("question", help="A standalone question")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        args = _create_parser().parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    try:
+        config = Config.from_env()
+    except RagError as exc:
+        _report_error(str(exc), Config(), "Configuration error")
+        return 1
+    if args.command == "ask" and not args.question.strip():
+        _report_error("Question must not be blank.", config, "Input error")
+        return 2
+    if not config.google_api_key:
+        _report_error("GOOGLE_API_KEY is required.", config, "Configuration error")
+        return 1
+
+    store: IndexStore | None = None
+    stage = "provider"
+    try:
+        if args.command == "index":
+            embeddings = create_embeddings(config)
+            stage = "database"
+            store = IndexStore(config, embeddings)
+            failures = index_path(args.path, config, store, embeddings)
+            return 1 if failures else 0
+
+        deferred_embeddings = _DeferredEmbeddings(lambda: create_embeddings(config))
+        stage = "database"
+        store = IndexStore(config, deferred_embeddings)
+        store.check_compatible()
+        stage = "provider"
+        model = create_chat_model(config)
+        stage = "rag"
+        state = build_graph(store, model, config.retrieval_k).invoke({"question": args.question})
+        print(render_result(state))
+        return 0
+    except RagError as exc:
+        message = str(exc)
+        lower = message.lower()
+        if stage == "database" or (stage == "rag" and any(token in lower for token in ("database", "postgres", "index", "indexed"))):
+            category = "Database error"
+        elif stage == "provider" or (stage == "rag" and any(token in lower for token in ("google", "provider", "embedding", "generation", "chat model"))):
+            category = "Provider error"
+        else:
+            category = "Error"
+        _report_error(message, config, category)
+        return 1
+    except Exception:
+        category = "Database error" if stage == "database" else (
+            "Provider error" if stage == "provider" or args.command == "ask" else "Indexing error"
+        )
+        _report_error("The request could not be completed; check provider and database settings.", config, category)
+        return 1
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

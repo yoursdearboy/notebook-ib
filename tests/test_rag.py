@@ -178,6 +178,7 @@ def test_model_factories_use_explicit_gemini_api_configuration_without_network()
     assert embeddings.model == "embedding-model-test"
     assert embeddings.output_dimensionality == 512
     assert embeddings.vertexai is False
+    assert embeddings.client.vertexai is False
     assert model.model == "chat-model-test"
     assert model.vertexai is False
     assert model.timeout == 60
