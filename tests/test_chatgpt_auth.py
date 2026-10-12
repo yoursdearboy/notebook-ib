@@ -651,3 +651,37 @@ def test_validation_hides_token_metadata(tmp_path: Path) -> None:
         auth.get_access_token()
 
     assert "P_SECRET_P_" not in str(exc_info.value)
+def test_refresh_retains_refresh_token_if_omitted(tmp_path: Path) -> None:
+    auth, _, client = create_mock_auth_environment(tmp_path)
+    original_handler = client._transport.handler
+
+    def nonrotating_refresh(req):
+        if req.url.path == "/api/accounts/oauth/token" and b"grant_type=refresh_token" in req.content:
+            res = original_handler(req)
+            data = res.json()
+            del data["refresh_token"] # Simulate omit
+            return httpx.Response(200, json=data)
+        return original_handler(req)
+
+    client._transport.handler = nonrotating_refresh
+
+    creds = ChatGPTCredentials(
+        client_id="issued_client_123",
+        subject="user123",
+        email="test@example.com",
+        id_token="mock_id_token",
+        access_token="old_access_token",
+        refresh_token="old_refresh_token",
+        access_token_expires_at=1020.0,
+        scopes=frozenset(["chatgpt.tokens.use.direct"]),
+        ext_agent_host_id="host123"
+    )
+    store = CredentialStore(tmp_path / "auth.json")
+    store.save(creds)
+
+    token = auth.get_access_token()
+    assert token == "mock_access_token"
+
+    loaded = store.load()
+    assert loaded.access_token == "mock_access_token"
+    assert loaded.refresh_token == "old_refresh_token" # explicitly retained

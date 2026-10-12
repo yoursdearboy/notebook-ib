@@ -352,7 +352,7 @@ class ChatGPTAuth:
             email=creds.email,
             id_token=new_id_token,
             access_token=token_data["access_token"],
-            refresh_token=token_data["refresh_token"],
+            refresh_token=token_data.get("refresh_token", creds.refresh_token),
             access_token_expires_at=self._clock() + token_data["expires_in"],
             scopes=scopes_granted,
             ext_agent_host_id=creds.ext_agent_host_id,
