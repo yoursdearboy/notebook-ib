@@ -270,6 +270,8 @@ class ChatGPTAuth:
         else:
             if not issued_client_id:
                 raise RagError("Authorization failed: no client_id returned.")
+            if issued_client_id == "dynamic_agent_client":
+                raise RagError("Authorization failed: provider returned placeholder client ID.")
 
         token_res = self._http_client.post(
             _TOKEN_URL,
@@ -293,7 +295,7 @@ class ChatGPTAuth:
         if "scope" in token_data:
             scopes_granted = frozenset(token_data["scope"].split())
             if "chatgpt.tokens.use.direct" not in scopes_granted:
-                raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
+                raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted. Please authorize this permission in ChatGPT and retry.")
         else:
             raise RagError("Authorization failed: scope was not returned.")
 
@@ -346,7 +348,7 @@ class ChatGPTAuth:
         if "scope" in token_data:
             scopes_granted = frozenset(token_data["scope"].split())
             if "chatgpt.tokens.use.direct" not in scopes_granted:
-                raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
+                raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted. Please authorize this permission in ChatGPT and retry.")
         else:
             scopes_granted = creds.scopes
 

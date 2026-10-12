@@ -54,11 +54,14 @@ class ChatGPTResponsesModel:
 
                             if hasattr(response_obj, "output") and response_obj.output:
                                 for item in response_obj.output:
+                                    if getattr(item, "type", None) not in ("message",):
+                                        raise RagError("The chat model returned an unsupported output item type.")
+
                                     if getattr(item, "type", None) == "message":
                                         for content in getattr(item, "content", []):
                                             if getattr(content, "type", None) == "refusal":
                                                 raise RagError("The chat model response was blocked by safety settings.")
-                                            elif getattr(content, "type", None) not in ("text", "output_text"):
+                                            elif getattr(content, "type", None) not in ("text", "output_text", "reasoning"):
                                                 raise RagError("The chat model returned unsupported response content.")
 
                             if not collected_text.strip():
@@ -71,4 +74,15 @@ class ChatGPTResponsesModel:
         except RagError:
             raise
         except Exception as exc:
+            import httpx
+            from openai import APIStatusError
+
+            if isinstance(exc, APIStatusError):
+                if exc.status_code == 401:
+                    raise RagError("Authorization failed. Your session may have expired. Please clear the credentials and re-authorize.") from exc
+                if exc.status_code == 403:
+                    raise RagError("Answer generation failed. You do not have permission to access the model or the provider rejected the request.") from exc
+                if exc.status_code == 429:
+                    raise RagError("Answer generation failed. You have exceeded your rate limit. Please retry later.") from exc
+
             raise RagError("Answer generation failed; the OpenAI model request did not complete.") from exc

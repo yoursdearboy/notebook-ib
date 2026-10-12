@@ -200,3 +200,63 @@ def test_invoke_verifies_base_url(monkeypatch):
 
     assert requested_url == "https://api.openai.com/v1/responses"
     assert "Bearer test-token" in requested_headers.get("Authorization", "")
+def test_invoke_rejects_unsupported_top_level_output_items():
+    events = [
+        FakeEvent("response.output_text.delta", text="part 1 "),
+        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", output=[FakeItem("function_call", [])]))
+    ]
+    def client_factory(token):
+        return FakeClient(FakeResponses(events))
+
+    model = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory)
+    with pytest.raises(RagError, match="unsupported output item"):
+        model.invoke([HumanMessage(content="usr")])
+def test_invoke_translates_api_status_errors():
+    import httpx
+    from openai import APIStatusError
+
+    def raise_err(code):
+        def client_factory(token):
+            res = httpx.Response(code, request=httpx.Request("GET", "http://example.com"))
+            raise APIStatusError("test err", response=res, body=None)
+        return client_factory
+
+    model1 = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=raise_err(401))
+    with pytest.raises(RagError, match="Authorization failed"):
+        model1.invoke([HumanMessage(content="usr")])
+
+    model2 = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=raise_err(403))
+    with pytest.raises(RagError, match="do not have permission"):
+        model2.invoke([HumanMessage(content="usr")])
+
+    model3 = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=raise_err(429))
+    with pytest.raises(RagError, match="exceeded your rate limit"):
+        model3.invoke([HumanMessage(content="usr")])
+
+def test_invoke_rejects_mixed_text_and_unsupported_output():
+    events = [
+        FakeEvent("response.output_text.delta", text="part 1 "),
+        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", output=[
+            FakeItem("message", [FakeContent("output_text")]),
+            FakeItem("function_call", [])
+        ]))
+    ]
+    def client_factory(token):
+        return FakeClient(FakeResponses(events))
+
+    model = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory)
+    with pytest.raises(RagError, match="unsupported output item"):
+        model.invoke([HumanMessage(content="usr")])
+
+    events2 = [
+        FakeEvent("response.output_text.delta", text="part 1 "),
+        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", output=[
+            FakeItem("message", [FakeContent("output_text"), FakeContent("image_url")])
+        ]))
+    ]
+    def client_factory2(token):
+        return FakeClient(FakeResponses(events2))
+
+    model2 = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory2)
+    with pytest.raises(RagError, match="unsupported response content"):
+        model2.invoke([HumanMessage(content="usr")])

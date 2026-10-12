@@ -364,3 +364,48 @@ def test_cli_errors_redact_api_keys_and_database_passwords(
     assert "fake-password" not in diagnostic
     assert "Provider error" in diagnostic
     assert store.closed
+
+def test_ask_empty_retrieval_with_openai_closes_auth(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch, GOOGLE_API_KEY="", EMBEDDING_PROVIDER="huggingface")
+    store = FakeStore()
+    store.documents = []
+
+    class LazyLikeFakeStore(FakeStore):
+        def __init__(self, config: Config, embeddings: Any) -> None:
+            super().__init__()
+            self.documents = store.documents
+        def search(self, question: str, k: int) -> list[Document]:
+            return self.documents
+
+    def mock_default_creds(*args, **kwargs):
+        return tmp_path / "auth.json"
+
+    monkeypatch.setattr("chatgpt_auth.default_credentials_path", mock_default_creds)
+
+    def mock_browser(*args):
+        pytest.fail("browser sign in was called")
+
+    monkeypatch.setattr("webbrowser.open", mock_browser)
+
+    closed = False
+
+    class MockClient:
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    def mock_client_factory(*args, **kwargs):
+        return MockClient()
+
+    monkeypatch.setattr("httpx.Client", mock_client_factory)
+
+    monkeypatch.setattr(app, "create_embeddings", lambda c: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", LazyLikeFakeStore)
+
+    result = app.main(["ask", "--provider", "openai", "What is the fact?"])
+
+    assert result == 0
+    assert closed
+    assert "No indexed context" in capsys.readouterr().out

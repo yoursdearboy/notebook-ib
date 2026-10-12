@@ -765,3 +765,32 @@ def test_callback_with_mismatched_client_id_fails(tmp_path: Path) -> None:
 
     with pytest.raises(RagError, match="does not match the hint"):
         auth._authorize(host_id="host123", client_id_hint="expected_client")
+def test_reject_placeholder_client_id_during_registration(tmp_path: Path) -> None:
+    auth, opened_urls, client = create_mock_auth_environment(tmp_path)
+
+    def mock_browser_returns_placeholder(url: str) -> bool:
+        opened_urls.append(url)
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        redirect_uri = query.get("redirect_uri", [""])[0]
+        state = query.get("state", [""])[0]
+        nonce = query.get("nonce", [""])[0]
+        httpx.Request._test_nonce = nonce
+
+        def make_request():
+            cb_parsed = urllib.parse.urlparse(redirect_uri)
+            import http.client
+            conn = http.client.HTTPConnection(cb_parsed.netloc)
+            conn.request("GET", f"{cb_parsed.path}?state={state}&code=mock_code&client_id=dynamic_agent_client")
+            conn.getresponse()
+
+        import threading
+        threading.Thread(target=make_request).start()
+        return True
+
+    auth._browser_open = mock_browser_returns_placeholder
+
+    with pytest.raises(RagError, match="placeholder"):
+        auth.get_access_token()
+
+    assert CredentialStore(tmp_path / "auth.json").load() is None
