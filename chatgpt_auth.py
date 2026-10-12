@@ -200,7 +200,13 @@ class ChatGPTAuth:
         nonce = _generate_random_string()
         verifier, challenge = _generate_pkce()
 
-        server = HTTPServer(("127.0.0.1", 0), _CallbackHandler)
+        class TimeoutServer(HTTPServer):
+            def get_request(self):
+                req, client_address = super().get_request()
+                req.settimeout(5.0) # 5 second timeout on reading from the accepted socket
+                return req, client_address
+
+        server = TimeoutServer(("127.0.0.1", 0), _CallbackHandler)
         port = server.server_port
         redirect_uri = f"http://127.0.0.1:{port}/auth/callback"
 
@@ -233,7 +239,6 @@ class ChatGPTAuth:
             if not r:
                 raise RagError("Authorization failed: timed out waiting for callback.")
 
-            server.timeout = 5.0 # Give it 5 seconds to complete the reading of the request once connected
             server.handle_request()
         finally:
             server.server_close()

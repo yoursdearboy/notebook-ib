@@ -596,8 +596,12 @@ def test_callback_stalled_connection_times_out(tmp_path: Path) -> None:
 
     auth = ChatGPTAuth(tmp_path / "auth.json", http_client=client, browser_open=stall_browser)
 
+    import time
+    start = time.time()
     with pytest.raises(RagError, match="timed out"):
         auth.get_access_token()
+    duration = time.time() - start
+    assert duration < 7.0 # it should timeout in ~5s
 def test_discovery_issuer_and_jwks_uri_are_validated(tmp_path: Path) -> None:
     auth, _, client = create_mock_auth_environment(tmp_path)
 
