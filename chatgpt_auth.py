@@ -143,8 +143,11 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed_path = urllib.parse.urlparse(self.path)
-        if parsed_path.path != "/auth/callback":
-            self.send_response(404)
+
+        expected_host = f"127.0.0.1:{self.server.server_port}"
+        if self.headers.get("Host") != expected_host or parsed_path.path != "/auth/callback":
+            self.server.callback_error = "malformed callback"
+            self.send_response(400)
             self.end_headers()
             return
 
@@ -220,23 +223,31 @@ class ChatGPTAuth:
             params["id_token_hint"] = id_token_hint
 
         auth_url = f"{_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
-        if not self._browser_open(auth_url):
+
+        try:
+            if not self._browser_open(auth_url):
+                raise RagError("Authorization failed: browser launch failed.")
+
+            import select
+            r, _, _ = select.select([server], [], [], 60.0) # 60 second timeout
+            if not r:
+                raise RagError("Authorization failed: timed out waiting for callback.")
+
+            server.timeout = 5.0 # Give it 5 seconds to complete the reading of the request once connected
+            server.handle_request()
+        finally:
             server.server_close()
-            raise RagError("Authorization failed: browser launch failed.")
 
-        import select
-        r, _, _ = select.select([server], [], [], 60.0) # 60 second timeout
-        if not r:
-            server.server_close()
-            raise RagError("Authorization failed: timed out waiting for callback.")
+        if getattr(server, "callback_error", None):
+            raise RagError(f"Authorization failed: {server.callback_error}")
 
-        server.handle_request()
-        server.server_close()
+        query = getattr(server, "callback_query", None)
 
-        query = getattr(server, "callback_query", {})
+        if query is None:
+            raise RagError("Authorization failed: timed out reading the callback request.")
 
         if not query:
-            raise RagError("Authorization failed: no callback received.")
+            raise RagError("Authorization failed: no callback parameters received.")
         if "error" in query:
             raise RagError("Authorization failed: user denied access.")
         if query.get("state", [""])[0] != state:
@@ -351,6 +362,10 @@ class ChatGPTAuth:
 
         jwks_uri = discovery_data["jwks_uri"]
         issuer = discovery_data["issuer"]
+        if issuer != "https://auth.openai.com":
+            raise RagError("ID token validation failed: OpenID discovery returned an unexpected issuer.")
+        if not jwks_uri.startswith("https://"):
+            raise RagError("ID token validation failed: OpenID discovery returned an insecure JWKS URI.")
 
         try:
             unverified = jwt.get_unverified_header(id_token)

@@ -13,14 +13,19 @@ class FakeDelta:
     def __init__(self, text: str):
         self.text = text
 
-class FakeStatusDetails:
+class FakeContent:
     def __init__(self, type_: str):
         self.type = type_
 
+class FakeItem:
+    def __init__(self, type_: str, content: list = None):
+        self.type = type_
+        self.content = content or []
+
 class FakeResponseObj:
-    def __init__(self, status: str = "completed", status_details=None):
+    def __init__(self, status: str = "completed", output=None):
         self.status = status
-        self.status_details = status_details
+        self.output = output
 
 class FakeEvent:
     def __init__(self, type_: str, text: str = None, response_obj=None):
@@ -128,7 +133,7 @@ def test_invoke_rejects_incomplete_or_failed_response():
 
 def test_invoke_rejects_empty_or_refusal_response():
     events = [
-        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", status_details=FakeStatusDetails("refusal")))
+        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", output=[FakeItem("message", [FakeContent("refusal")])]))
     ]
     def client_factory(token):
         return FakeClient(FakeResponses(events))
@@ -146,6 +151,15 @@ def test_invoke_rejects_empty_or_refusal_response():
     with pytest.raises(RagError, match="no usable text"):
         model2.invoke([HumanMessage(content="usr")])
 
+    events3 = [
+        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", output=[FakeItem("message", [FakeContent("image")])]))
+    ]
+    def client_factory3(token):
+        return FakeClient(FakeResponses(events3))
+    model3 = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory3)
+    with pytest.raises(RagError, match="unsupported response content"):
+        model3.invoke([HumanMessage(content="usr")])
+
 def test_invoke_sanitizes_provider_errors():
     def client_factory(token):
         raise RuntimeError("secret provider error")
@@ -153,3 +167,36 @@ def test_invoke_sanitizes_provider_errors():
     model = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory)
     with pytest.raises(RagError, match="Answer generation failed; the OpenAI model request did not complete"):
         model.invoke([HumanMessage(content="usr")])
+def test_invoke_verifies_base_url(monkeypatch):
+    import httpx
+
+    class TestAuth(FakeAuth):
+        def get_access_token(self):
+            return "test-token"
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://foreign.example.com/v1")
+
+    requested_url = None
+    requested_headers = None
+
+    def mock_handler(req):
+        nonlocal requested_url, requested_headers
+        requested_url = str(req.url)
+        requested_headers = req.headers
+        return httpx.Response(500) # Stop execution
+
+    def mock_client(*args, **kwargs):
+        from openai import OpenAI
+        kwargs["http_client"] = httpx.Client(transport=httpx.MockTransport(mock_handler))
+        return OpenAI(*args, **kwargs)
+
+    monkeypatch.setattr("chatgpt_model.OpenAI", mock_client)
+
+    model = ChatGPTResponsesModel(TestAuth(), "test-model")
+    try:
+        model.invoke([HumanMessage(content="usr")])
+    except RagError:
+        pass
+
+    assert requested_url == "https://api.openai.com/v1/responses"
+    assert "Bearer test-token" in requested_headers.get("Authorization", "")

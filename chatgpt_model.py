@@ -25,7 +25,7 @@ class ChatGPTResponsesModel:
             token = self.auth.get_access_token()
 
             client = (self._client_factory(token) if self._client_factory
-                      else OpenAI(api_key=token, max_retries=0, timeout=60))
+                      else OpenAI(api_key=token, base_url="https://api.openai.com/v1", max_retries=0, timeout=60))
 
             messages = []
             for msg in prompt:
@@ -49,13 +49,17 @@ class ChatGPTResponsesModel:
                             collected_text += event.delta
                         elif event.type == "response.completed":
                             response_obj = event.response
-                            if hasattr(response_obj, "status") and response_obj.status != "completed":
-                                raise RagError(f"OpenAI response did not complete successfully (status: {response_obj.status}).")
+                            if getattr(response_obj, "status", None) != "completed":
+                                raise RagError(f"OpenAI response did not complete successfully (status: {getattr(response_obj, 'status', 'unknown')}).")
 
-                            if hasattr(response_obj, "status_details") and response_obj.status_details:
-                                details = response_obj.status_details
-                                if hasattr(details, "type") and details.type == "refusal":
-                                    raise RagError("The chat model response was blocked by safety settings.")
+                            if hasattr(response_obj, "output") and response_obj.output:
+                                for item in response_obj.output:
+                                    if getattr(item, "type", None) == "message":
+                                        for content in getattr(item, "content", []):
+                                            if getattr(content, "type", None) == "refusal":
+                                                raise RagError("The chat model response was blocked by safety settings.")
+                                            elif getattr(content, "type", None) != "text":
+                                                raise RagError("The chat model returned unsupported response content.")
 
                             if not collected_text.strip():
                                 raise RagError("The chat model returned no usable text; the response may have been blocked.")

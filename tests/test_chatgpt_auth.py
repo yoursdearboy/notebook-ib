@@ -539,3 +539,92 @@ def test_concurrent_refresh_is_serialized(tmp_path: Path) -> None:
 
     assert token == "mock_access_token"
     assert end - start >= 0.9 # Took at least ~1 second waiting for lock
+def test_callback_rejects_wrong_host(tmp_path: Path) -> None:
+    client = httpx.Client(transport=MockTransport(lambda req: httpx.Response(404)))
+
+    def reject_browser(url: str) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        redirect_uri = query.get("redirect_uri", [""])[0]
+
+        def make_request():
+            cb_parsed = urllib.parse.urlparse(redirect_uri)
+            import socket
+            port = int(cb_parsed.netloc.split(":")[1])
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(("127.0.0.1", port))
+            # Construct raw HTTP request with wrong host
+            req = f"GET {cb_parsed.path}?state={query.get('state', [''])[0]}&code=mock_code&client_id=issued_client_123 HTTP/1.1\r\n"
+            req += "Host: attacker.com\r\n"
+            req += "Connection: close\r\n\r\n"
+            s.sendall(req.encode("utf-8"))
+            s.recv(1024)
+            s.close()
+
+        import threading
+        threading.Thread(target=make_request).start()
+
+        return True
+
+    auth = ChatGPTAuth(tmp_path / "auth.json", http_client=client, browser_open=reject_browser)
+
+    with pytest.raises(RagError, match="malformed callback"):
+        auth.get_access_token()
+def test_callback_stalled_connection_times_out(tmp_path: Path) -> None:
+    client = httpx.Client(transport=MockTransport(lambda req: httpx.Response(404)))
+
+    def stall_browser(url: str) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        redirect_uri = query.get("redirect_uri", [""])[0]
+
+        def make_request():
+            cb_parsed = urllib.parse.urlparse(redirect_uri)
+            import socket
+            port = int(cb_parsed.netloc.split(":")[1])
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(("127.0.0.1", port))
+            # Just hang
+            import time
+            time.sleep(10.0)
+            s.close()
+
+        import threading
+        threading.Thread(target=make_request).start()
+
+        return True
+
+    auth = ChatGPTAuth(tmp_path / "auth.json", http_client=client, browser_open=stall_browser)
+
+    with pytest.raises(RagError, match="timed out"):
+        auth.get_access_token()
+def test_discovery_issuer_and_jwks_uri_are_validated(tmp_path: Path) -> None:
+    auth, _, client = create_mock_auth_environment(tmp_path)
+
+    original_handler = client._transport.handler
+
+    def bad_discovery_handler(req):
+        if req.url.path == "/.well-known/openid-configuration":
+            return httpx.Response(200, json={
+                "issuer": "https://attacker.com",
+                "jwks_uri": "https://auth.openai.com/.well-known/jwks.json"
+            })
+        return original_handler(req)
+
+    client._transport.handler = bad_discovery_handler
+
+    with pytest.raises(RagError, match="unexpected issuer"):
+        auth.get_access_token()
+
+    def insecure_jwks_handler(req):
+        if req.url.path == "/.well-known/openid-configuration":
+            return httpx.Response(200, json={
+                "issuer": "https://auth.openai.com",
+                "jwks_uri": "http://auth.openai.com/.well-known/jwks.json"
+            })
+        return original_handler(req)
+
+    client._transport.handler = insecure_jwks_handler
+
+    with pytest.raises(RagError, match="insecure JWKS URI"):
+        auth.get_access_token()
