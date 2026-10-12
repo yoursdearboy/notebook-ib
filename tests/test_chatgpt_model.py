@@ -26,7 +26,7 @@ class FakeEvent:
     def __init__(self, type_: str, text: str = None, response_obj=None):
         self.type = type_
         if text is not None:
-            self.delta = FakeDelta(text)
+            self.delta = text
         if response_obj is not None:
             self.response = response_obj
 
@@ -66,7 +66,7 @@ def test_invoke_sends_selected_model_and_privacy_options():
         assert kwargs["input"] == [{"role": "system", "content": "sys"}, {"role": "user", "content": "usr"}]
 
     events = [
-        FakeEvent("response.output_item.delta", text="ok"),
+        FakeEvent("response.output_text.delta", text="ok"),
         FakeEvent("response.completed", response_obj=FakeResponseObj())
     ]
 
@@ -79,8 +79,8 @@ def test_invoke_sends_selected_model_and_privacy_options():
 
 def test_invoke_streams_and_collects_completed_text():
     events = [
-        FakeEvent("response.output_item.delta", text="part 1 "),
-        FakeEvent("response.output_item.delta", text="part 2"),
+        FakeEvent("response.output_text.delta", text="part 1 "),
+        FakeEvent("response.output_text.delta", text="part 2"),
         FakeEvent("response.completed", response_obj=FakeResponseObj())
     ]
     def client_factory(token):
@@ -91,12 +91,32 @@ def test_invoke_streams_and_collects_completed_text():
     assert res.content == "part 1 part 2"
 
 def test_invoke_uses_fresh_access_token():
-    # Implicitly tested above
-    pass
+    class TokenAuth(FakeAuth):
+        def __init__(self):
+            self.calls = 0
+        def get_access_token(self) -> str:
+            self.calls += 1
+            return f"token-{self.calls}"
+
+    auth = TokenAuth()
+
+    def client_factory(token):
+        assert token == "token-1"
+        return FakeClient(FakeResponses([FakeEvent("response.output_text.delta", text="a"), FakeEvent("response.completed", response_obj=FakeResponseObj())]))
+
+    model = ChatGPTResponsesModel(auth, "test", client_factory=client_factory)
+    model.invoke([HumanMessage(content="usr")])
+
+    def client_factory2(token):
+        assert token == "token-2"
+        return FakeClient(FakeResponses([FakeEvent("response.output_text.delta", text="b"), FakeEvent("response.completed", response_obj=FakeResponseObj())]))
+
+    model._client_factory = client_factory2
+    model.invoke([HumanMessage(content="usr")])
 
 def test_invoke_rejects_incomplete_or_failed_response():
     events = [
-        FakeEvent("response.output_item.delta", text="part 1 "),
+        FakeEvent("response.output_text.delta", text="part 1 "),
         FakeEvent("response.completed", response_obj=FakeResponseObj(status="incomplete"))
     ]
     def client_factory(token):

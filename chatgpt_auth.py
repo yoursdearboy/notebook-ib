@@ -205,9 +205,19 @@ class ChatGPTAuth:
             params["id_token_hint"] = id_token_hint
 
         auth_url = f"{_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
-        self._browser_open(auth_url)
+        if not self._browser_open(auth_url):
+            server.server_close()
+            raise RagError("Authorization failed: browser launch failed.")
+
+        import select
+        r, _, _ = select.select([server], [], [], 60.0) # 60 second timeout
+        if not r:
+            server.server_close()
+            raise RagError("Authorization failed: timed out waiting for callback.")
 
         server.handle_request()
+        server.server_close()
+
         query = getattr(server, "callback_query", {})
 
         if not query:
@@ -243,9 +253,12 @@ class ChatGPTAuth:
 
         claims = self._validate_id_token(id_token, expected_client_id=issued_client_id, expected_nonce=nonce)
 
-        scopes_granted = frozenset(token_data.get("scope", "").split())
-        if "chatgpt.tokens.use.direct" not in scopes_granted:
-            raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
+        if "scope" in token_data:
+            scopes_granted = frozenset(token_data["scope"].split())
+            if "chatgpt.tokens.use.direct" not in scopes_granted:
+                raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
+        else:
+            scopes_granted = creds.scopes
 
         return ChatGPTCredentials(
             client_id=issued_client_id,
@@ -293,9 +306,12 @@ class ChatGPTAuth:
         else:
             new_id_token = creds.id_token
 
-        scopes_granted = frozenset(token_data.get("scope", "").split())
-        if "chatgpt.tokens.use.direct" not in scopes_granted:
-            raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
+        if "scope" in token_data:
+            scopes_granted = frozenset(token_data["scope"].split())
+            if "chatgpt.tokens.use.direct" not in scopes_granted:
+                raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
+        else:
+            scopes_granted = creds.scopes
 
         new_creds = ChatGPTCredentials(
             client_id=creds.client_id,

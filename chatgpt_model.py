@@ -45,8 +45,8 @@ class ChatGPTResponsesModel:
                     stream=True
                 ) as stream:
                     for event in stream:
-                        if event.type == "response.output_item.delta" and hasattr(event, "delta") and hasattr(event.delta, "text"):
-                            collected_text += event.delta.text
+                        if event.type == "response.output_text.delta" and hasattr(event, "delta") and isinstance(event.delta, str):
+                            collected_text += event.delta
                         elif event.type == "response.completed":
                             response_obj = event.response
                             if hasattr(response_obj, "status") and response_obj.status != "completed":

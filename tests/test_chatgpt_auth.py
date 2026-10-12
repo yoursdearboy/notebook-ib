@@ -214,14 +214,14 @@ def test_authorize_uses_dynamic_client_and_required_scopes(tmp_path: Path) -> No
 
 def test_host_id_is_persisted_before_browser_opens(tmp_path: Path) -> None:
     def fail_browser(url: str) -> bool:
-        raise RuntimeError("Browser failed")
+        return False
 
     auth = ChatGPTAuth(
         tmp_path / "auth.json",
         browser_open=fail_browser
     )
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RagError, match="browser launch failed"):
         auth.get_access_token()
 
     store = CredentialStore(tmp_path / "auth.json")
@@ -456,4 +456,50 @@ def test_reauthorization_identity_mismatch_preserves_credentials(tmp_path: Path)
     assert loaded.access_token == "old_access_token"
 
 def test_concurrent_refresh_is_serialized(tmp_path: Path) -> None:
-    pass
+    auth, _, _ = create_mock_auth_environment(tmp_path)
+    creds = ChatGPTCredentials(
+        client_id="issued_client_123",
+        subject="user123",
+        email="test@example.com",
+        id_token="mock_id_token",
+        access_token="old_access_token",
+        refresh_token="old_refresh_token",
+        access_token_expires_at=1020.0,
+        scopes=frozenset(["chatgpt.tokens.use.direct"]),
+        ext_agent_host_id="host123"
+    )
+    store = CredentialStore(tmp_path / "auth.json")
+    store.save(creds)
+
+    import threading
+    lock_path = tmp_path / "auth.json.lock"
+    import time
+
+    # We acquire the lock in a background thread and hold it
+    # We should see the foreground thread wait until it's released
+    acquired = False
+
+    def background_holder():
+        nonlocal acquired
+        from filelock import FileLock
+        with FileLock(lock_path):
+            acquired = True
+            time.sleep(1.0)
+
+    t = threading.Thread(target=background_holder)
+    t.start()
+
+    # Give the thread a moment to acquire the lock
+    time.sleep(0.1)
+
+    assert acquired
+
+    start = time.time()
+    # This should block until the lock is released
+    token = auth.get_access_token()
+    end = time.time()
+
+    t.join()
+
+    assert token == "mock_access_token"
+    assert end - start >= 0.9 # Took at least ~1 second waiting for lock
