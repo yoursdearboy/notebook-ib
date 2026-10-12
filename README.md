@@ -4,11 +4,11 @@ This command-line tool indexes local text, Markdown, and PDFs into PostgreSQL wi
 
 ## Setup
 
-Copy the example configuration, set a Google Gemini API key for answer generation, and start PostgreSQL:
+Copy the example configuration, set a Google Gemini API key if using Google for answer generation or embeddings, and start PostgreSQL:
 
 ```sh
 cp .env.example .env
-# Set GOOGLE_API_KEY in .env (used for answer generation)
+# Set GOOGLE_API_KEY in .env (required for Google generation or Google embeddings)
 docker compose up -d --wait
 uv sync
 ```
@@ -21,7 +21,7 @@ EMBEDDING_MODEL=BAAI/bge-m3
 EMBEDDING_DIMENSION=1024
 ```
 
-To use Google embeddings instead, set `EMBEDDING_PROVIDER=google`, choose a Google embedding model in `EMBEDDING_MODEL`, and set `GOOGLE_API_KEY`. The same API key is used for Gemini answer generation. Changing the embedding provider, model, or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
+To use Google embeddings instead, set `EMBEDDING_PROVIDER=google`, choose a Google embedding model in `EMBEDDING_MODEL`, and set `GOOGLE_API_KEY`. Changing the embedding provider, model, or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
 
 ## Use
 
@@ -29,8 +29,15 @@ Index one supported file or recursively scan a directory. Unsupported file types
 
 ```sh
 uv run main.py index ./documents
-uv run main.py ask "What color was the comet?"
+uv run main.py ask --provider openai "What color was the comet?"
+uv run main.py ask --provider openai --model MODEL "What color was the comet?"
+uv run main.py ask --provider google "What color was the comet?"
 ```
+
+The `ask` command requires selecting an explicit provider (`--provider {google,openai}`) for answer generation.
+
+- For the `openai` provider, it uses the OpenAI Responses API. On the first use, it automatically starts a browser authorization flow to securely sign in with ChatGPT and authorize the tool to use the generated tokens. The resulting refreshable credentials are saved in a private config file (`~/.config/notebook-ib/auth.json` or `$XDG_CONFIG_HOME/notebook-ib/auth.json`). The `gpt-6-luna` model is used by default. Do not put an OpenAI API key in `.env`.
+- For the `google` provider, it uses the existing `GOOGLE_CHAT_MODEL` default unless overridden, and requires the `GOOGLE_API_KEY` to be set in `.env`.
 
 If the embedding provider, model, or dimension changes, rebuild the index from scratch:
 
