@@ -71,15 +71,29 @@ def test_missing_subcommand_shows_usage_and_returns_argument_error(capsys: pytes
     assert "usage:" in captured.err.lower()
 
 
+def test_ask_without_provider_shows_usage_and_returns_argument_error(capsys: pytest.CaptureFixture[str]) -> None:
+    result = app.main(["ask", "What is in the index?"])
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert "the following arguments are required: --provider" in captured.err
+
+def test_ask_unsupported_provider_shows_usage_and_returns_argument_error(capsys: pytest.CaptureFixture[str]) -> None:
+    result = app.main(["ask", "--provider", "invalid", "What is in the index?"])
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert "invalid choice: 'invalid'" in captured.err
+
 def test_blank_question_fails_before_service_factories(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     set_config_env(monkeypatch)
     monkeypatch.setattr(app, "create_embeddings", lambda config: pytest.fail("embeddings factory called"))
-    monkeypatch.setattr(app, "create_chat_model", lambda config: pytest.fail("chat factory called"))
+    monkeypatch.setattr(app, "create_chat_model", lambda *args: pytest.fail("chat factory called"))
     monkeypatch.setattr(app, "IndexStore", lambda *args: pytest.fail("store created"))
 
-    result = app.main(["ask", "   "])
+    result = app.main(["ask", "--provider", "google", "   "])
 
     assert result == 2
     assert "question must not be blank" in capsys.readouterr().err.lower()
@@ -90,13 +104,91 @@ def test_missing_credentials_fails_before_service_factories(
 ) -> None:
     set_config_env(monkeypatch, GOOGLE_API_KEY="")
     monkeypatch.setattr(app, "create_embeddings", lambda config: pytest.fail("embeddings factory called"))
-    monkeypatch.setattr(app, "create_chat_model", lambda config: pytest.fail("chat factory called"))
+    monkeypatch.setattr(app, "create_chat_model", lambda *args: pytest.fail("chat factory called"))
     monkeypatch.setattr(app, "IndexStore", lambda *args: pytest.fail("store created"))
 
-    result = app.main(["ask", "What is in the index?"])
+    result = app.main(["ask", "--provider", "google", "What is in the index?"])
 
     assert result == 1
     assert "google_api_key" in capsys.readouterr().err.lower()
+
+def test_missing_credentials_fails_when_google_embeddings_configured(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    set_config_env(monkeypatch, GOOGLE_API_KEY="", EMBEDDING_PROVIDER="google")
+    monkeypatch.setattr(app, "create_embeddings", lambda config: pytest.fail("embeddings factory called"))
+    monkeypatch.setattr(app, "create_chat_model", lambda *args: pytest.fail("chat factory called"))
+    monkeypatch.setattr(app, "IndexStore", lambda *args: pytest.fail("store created"))
+
+    result = app.main(["ask", "--provider", "openai", "What is in the index?"])
+
+    assert result == 1
+    assert "google_api_key" in capsys.readouterr().err.lower()
+
+def test_openai_generation_with_local_embeddings_does_not_require_google_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch, GOOGLE_API_KEY="", EMBEDDING_PROVIDER="huggingface")
+    events: list[str] = []
+    store = FakeStore(events)
+    store.documents = [Document(id="one", page_content="Fact from a file.", metadata={"source": str(tmp_path / "fact.txt"), "line_start": 1, "line_end": 1})]
+
+    def make_embeddings(config: Config) -> FakeEmbeddings:
+        return FakeEmbeddings()
+
+    class LazyLikeFakeStore(FakeStore):
+        def __init__(self, config: Config, embeddings: Any) -> None:
+            super().__init__(events)
+            self.documents = store.documents
+            self.embeddings = embeddings
+        def search(self, question: str, k: int) -> list[Document]:
+            self.embeddings.embed_query(question)
+            return self.documents
+
+    def make_chat_model(*args) -> Any:
+        class Model:
+            def invoke(self, prompt: Any) -> AIMessage:
+                return AIMessage(content="The fact is supported [1].")
+        return Model()
+
+    monkeypatch.setattr(app, "create_embeddings", make_embeddings)
+    monkeypatch.setattr(app, "create_chat_model", make_chat_model)
+    monkeypatch.setattr(app, "IndexStore", LazyLikeFakeStore)
+
+    result = app.main(["ask", "--provider", "openai", "What is the fact?"])
+    assert result == 0
+
+def test_empty_retrieval_with_openai_does_not_start_browser_sign_in(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch, GOOGLE_API_KEY="", EMBEDDING_PROVIDER="huggingface")
+    store = FakeStore()
+    store.documents = []
+
+    class LazyLikeFakeStore(FakeStore):
+        def __init__(self, config: Config, embeddings: Any) -> None:
+            super().__init__()
+            self.documents = store.documents
+        def search(self, question: str, k: int) -> list[Document]:
+            return self.documents
+
+    def mock_default_creds(*args, **kwargs):
+        return tmp_path / "auth.json"
+
+    monkeypatch.setattr("chatgpt_auth.default_credentials_path", mock_default_creds)
+
+    def failing_browser(*args):
+        pytest.fail("browser sign in was called")
+
+    monkeypatch.setattr("webbrowser.open", failing_browser)
+
+    monkeypatch.setattr(app, "create_embeddings", lambda c: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", LazyLikeFakeStore)
+
+    result = app.main(["ask", "--provider", "openai", "What is the fact?"])
+
+    assert result == 0
+    assert "No indexed context" in capsys.readouterr().out
 
 
 def test_directory_index_continues_after_corrupt_pdf_and_returns_failure(
@@ -225,7 +317,7 @@ def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
             self.embeddings.embed_query(question)
             return self.documents
 
-    def make_chat_model(config: Config) -> Any:
+    def make_chat_model(config: Config, provider: str, model_override: str | None) -> Any:
         events.append("chat")
 
         class Model:
@@ -239,7 +331,7 @@ def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
     monkeypatch.setattr(app, "create_chat_model", make_chat_model)
     monkeypatch.setattr(app, "IndexStore", LazyLikeFakeStore)
 
-    result = app.main(["ask", "What is the fact?"])
+    result = app.main(["ask", "--provider", "google", "What is the fact?"])
     captured = capsys.readouterr()
 
     assert result == 0, f"{captured.err} events={events!r}"
@@ -261,10 +353,10 @@ def test_cli_errors_redact_api_keys_and_database_passwords(
     monkeypatch.setattr(
         app,
         "create_chat_model",
-        lambda config: (_ for _ in ()).throw(RagError(f"model failed {secret_key} at {secret_url}")),
+        lambda *args: (_ for _ in ()).throw(RagError(f"model failed {secret_key} at {secret_url}")),
     )
 
-    result = app.main(["ask", "Question?"])
+    result = app.main(["ask", "--provider", "google", "Question?"])
     diagnostic = capsys.readouterr().err
 
     assert result == 1

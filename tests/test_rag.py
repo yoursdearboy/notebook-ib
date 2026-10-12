@@ -184,7 +184,7 @@ def test_model_factories_use_explicit_gemini_api_configuration_without_network()
     )
 
     embeddings = create_embeddings(config)
-    model = create_chat_model(config)
+    model = create_chat_model(config, provider="google", model_override=None)
 
     assert embeddings.model == "embedding-model-test"
     assert embeddings.output_dimensionality == 512

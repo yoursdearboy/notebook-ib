@@ -498,19 +498,28 @@ def create_embeddings(config: Config) -> Embeddings:
         raise RagError("Could not configure Google embeddings; check the API key and model settings.") from exc
 
 
-def create_chat_model(config: Config) -> BaseChatModel:
-    if not config.google_api_key:
-        raise RagError("GOOGLE_API_KEY is required to create the Google chat model.")
-    try:
-        return ChatGoogleGenerativeAI(
-            model=config.google_chat_model,
-            google_api_key=config.google_api_key,
-            vertexai=False,
-            request_timeout=60,
-            retries=2,
-        )
-    except Exception as exc:
-        raise RagError("Could not configure the Google chat model; check the API key and model settings.") from exc
+def create_chat_model(config: Config, provider: str, model_override: str | None = None) -> BaseChatModel:
+    if provider == "google":
+        if not config.google_api_key:
+            raise RagError("GOOGLE_API_KEY is required to create the Google chat model.")
+        try:
+            return ChatGoogleGenerativeAI(
+                model=model_override or config.google_chat_model,
+                google_api_key=config.google_api_key,
+                vertexai=False,
+                request_timeout=60,
+                retries=2,
+            )
+        except Exception as exc:
+            raise RagError("Could not configure the Google chat model; check the API key and model settings.") from exc
+    elif provider == "openai":
+        from chatgpt_auth import ChatGPTAuth, default_credentials_path
+        from chatgpt_model import ChatGPTResponsesModel
+
+        auth = ChatGPTAuth(default_credentials_path())
+        return ChatGPTResponsesModel(auth=auth, model=model_override or "gpt-6-luna")
+    else:
+        raise RagError(f"Unsupported provider: {provider}")
 
 
 def _normalize_model_content(response: object) -> str:
@@ -593,7 +602,7 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
         except RagError:
             raise
         except Exception as exc:
-            raise RagError("Answer generation failed; the Google model request did not complete.") from exc
+            raise RagError("Answer generation failed; the provider model request did not complete.") from exc
         _validate_citations(answer, len(documents))
         return {"answer": answer}
 
@@ -736,6 +745,8 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Comma-separated language codes for Unstructured OCR (default: eng)",
     )
     ask_parser = commands.add_parser("ask", help="Ask a question about indexed documents")
+    ask_parser.add_argument("--provider", choices=["google", "openai"], required=True, help="Answer generation provider")
+    ask_parser.add_argument("--model", help="Override the default model for the selected provider")
     ask_parser.add_argument("question", help="A standalone question")
     return parser
 
@@ -756,9 +767,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ask" and not args.question.strip():
         _report_error("Question must not be blank.", config, "Input error")
         return 2
-    if args.command == "ask" and not config.google_api_key:
-        _report_error("GOOGLE_API_KEY is required.", config, "Configuration error")
-        return 1
+    if args.command == "ask":
+        if args.provider == "google" and not config.google_api_key:
+            _report_error("GOOGLE_API_KEY is required for the google provider.", config, "Configuration error")
+            return 1
+        if config.embedding_provider == "google" and not config.google_api_key:
+            _report_error("GOOGLE_API_KEY is required when Google embeddings are configured.", config, "Configuration error")
+            return 1
 
     store: IndexStore | None = None
     stage = "provider"
@@ -775,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
         store = IndexStore(config, deferred_embeddings)
         store.check_compatible()
         stage = "provider"
-        model = create_chat_model(config)
+        model = create_chat_model(config, getattr(args, "provider", ""), getattr(args, "model", None))
         stage = "rag"
         state = build_graph(store, model, config.retrieval_k).invoke({"question": args.question})
         print(render_result(state))
