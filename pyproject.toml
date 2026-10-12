@@ -17,7 +17,10 @@ dependencies = [
     "python-dotenv>=1.1",
     "sqlalchemy>=2.0",
     "langchain-huggingface[full]>=1.2.3",
+    "httpx>=0.27",
     "pyjwt[crypto]>=2.10",
+    "filelock>=3.19",
+    "openai>=2.0",
 ]
 
 [project.optional-dependencies]
