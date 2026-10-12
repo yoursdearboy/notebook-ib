@@ -54,7 +54,7 @@ class ChatGPTResponsesModel:
 
                             if hasattr(response_obj, "output") and response_obj.output:
                                 for item in response_obj.output:
-                                    if getattr(item, "type", None) not in ("message",):
+                                    if getattr(item, "type", None) not in ("message", "reasoning"):
                                         raise RagError("The chat model returned an unsupported output item type.")
 
                                     if getattr(item, "type", None) == "message":

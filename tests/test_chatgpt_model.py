@@ -260,3 +260,17 @@ def test_invoke_rejects_mixed_text_and_unsupported_output():
     model2 = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory2)
     with pytest.raises(RagError, match="unsupported response content"):
         model2.invoke([HumanMessage(content="usr")])
+def test_invoke_accepts_reasoning_metadata():
+    events = [
+        FakeEvent("response.output_text.delta", text="The comet was blue [1]."),
+        FakeEvent("response.completed", response_obj=FakeResponseObj(status="completed", output=[
+            FakeItem("reasoning", []),
+            FakeItem("message", [FakeContent("output_text")])
+        ]))
+    ]
+    def client_factory(token):
+        return FakeClient(FakeResponses(events))
+
+    model = ChatGPTResponsesModel(FakeAuth(), "test-model", client_factory=client_factory)
+    res = model.invoke([HumanMessage(content="usr")])
+    assert res.content == "The comet was blue [1]."
