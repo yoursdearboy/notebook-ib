@@ -381,7 +381,7 @@ class ChatGPTAuth:
                     signing_key = key
                     break
             else:
-                raise jwt.PyJWKClientError(f'Unable to find a signing key that matches: "{kid}"')
+                raise RagError("ID token validation failed: unable to find a matching signing key.")
 
             # verify token
             claims = jwt.decode(
@@ -401,5 +401,5 @@ class ChatGPTAuth:
 
             return claims
 
-        except jwt.PyJWTError as e:
-            raise RagError(f"ID token validation failed: {str(e)}")
+        except jwt.PyJWTError:
+            raise RagError("ID token validation failed: could not decode or verify token claims.")

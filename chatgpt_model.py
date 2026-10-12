@@ -58,7 +58,7 @@ class ChatGPTResponsesModel:
                                         for content in getattr(item, "content", []):
                                             if getattr(content, "type", None) == "refusal":
                                                 raise RagError("The chat model response was blocked by safety settings.")
-                                            elif getattr(content, "type", None) != "text":
+                                            elif getattr(content, "type", None) not in ("text", "output_text"):
                                                 raise RagError("The chat model returned unsupported response content.")
 
                             if not collected_text.strip():

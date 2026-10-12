@@ -86,7 +86,7 @@ def test_invoke_streams_and_collects_completed_text():
     events = [
         FakeEvent("response.output_text.delta", text="part 1 "),
         FakeEvent("response.output_text.delta", text="part 2"),
-        FakeEvent("response.completed", response_obj=FakeResponseObj())
+        FakeEvent("response.completed", response_obj=FakeResponseObj(output=[FakeItem("message", [FakeContent("output_text")])]))
     ]
     def client_factory(token):
         return FakeClient(FakeResponses(events))

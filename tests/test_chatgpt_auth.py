@@ -628,3 +628,22 @@ def test_discovery_issuer_and_jwks_uri_are_validated(tmp_path: Path) -> None:
 
     with pytest.raises(RagError, match="insecure JWKS URI"):
         auth.get_access_token()
+def test_validation_hides_token_metadata(tmp_path: Path) -> None:
+    auth, _, client = create_mock_auth_environment(tmp_path)
+
+    original_handler = client._transport.handler
+
+    def bad_jwt_handler(req):
+        if req.url.path == "/api/accounts/oauth/token":
+            res = original_handler(req)
+            data = res.json()
+            data["id_token"] = "eyJhbGciOiJSUzI1NiIsImtpZCI6IlBfU0VDUkVUX1BfIn0.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ" # A token with kid="P_SECRET_P_"
+            return httpx.Response(200, json=data)
+        return original_handler(req)
+
+    client._transport.handler = bad_jwt_handler
+
+    with pytest.raises(RagError) as exc_info:
+        auth.get_access_token()
+
+    assert "P_SECRET_P_" not in str(exc_info.value)

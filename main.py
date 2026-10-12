@@ -495,18 +495,23 @@ def create_embeddings(config: Config) -> Embeddings:
         raise RagError("Could not configure Google embeddings; check the API key and model settings.") from exc
 
 
-def create_chat_model(config: Config, provider: str, model_override: str | None = None) -> BaseChatModel:
+from typing import Protocol, cast
+
+class ChatModel(Protocol):
+    def invoke(self, prompt: Sequence[BaseMessage]) -> BaseMessage: ...
+
+def create_chat_model(config: Config, provider: str, model_override: str | None = None) -> ChatModel:
     if provider == "google":
         if not config.google_api_key:
             raise RagError("GOOGLE_API_KEY is required to create the Google chat model.")
         try:
-            return ChatGoogleGenerativeAI(
+            return cast(ChatModel, ChatGoogleGenerativeAI(
                 model=model_override or config.google_chat_model,
                 google_api_key=config.google_api_key,
                 vertexai=False,
                 request_timeout=60,
                 retries=2,
-            )
+            ))
         except Exception as exc:
             raise RagError("Could not configure the Google chat model; check the API key and model settings.") from exc
     elif provider == "openai":
@@ -559,7 +564,7 @@ def _validate_citations(answer: str, reference_count: int) -> None:
             raise RagError(f"The answer contains an unknown reference [{citation}].")
 
 
-def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStateGraph:
+def build_graph(store: IndexStore, model: ChatModel, k: int) -> CompiledStateGraph:
     def retrieve(state: RagState) -> dict[str, list[Document]]:
         try:
             return {"documents": store.search(state["question"], k)}
@@ -815,6 +820,13 @@ def main(argv: list[str] | None = None) -> int:
                 store.close()
             except Exception:
                 pass
+        try:
+            if 'model' in locals():
+                from chatgpt_model import ChatGPTResponsesModel
+                if isinstance(model, ChatGPTResponsesModel):
+                    model.auth.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
