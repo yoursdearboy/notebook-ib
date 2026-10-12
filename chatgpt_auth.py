@@ -222,9 +222,9 @@ class ChatGPTAuth:
             "code_challenge_method": "S256",
             "resource": _RESOURCE,
         }
+        params["ext_agent_host_id"] = host_id
         if not client_id_hint:
             params["agent_name_hint"] = "notebook-ib"
-            params["ext_agent_host_id"] = host_id
         if id_token_hint:
             params["id_token_hint"] = id_token_hint
 
@@ -262,10 +262,14 @@ class ChatGPTAuth:
             raise RagError("Authorization failed: no code received.")
 
         issued_client_id = query.get("client_id", [""])[0]
-        if not issued_client_id:
-            raise RagError("Authorization failed: no client_id returned.")
-        if client_id_hint is not None and issued_client_id != client_id_hint:
-            raise RagError("Authorization failed: issued client ID does not match the hint.")
+        if client_id_hint is not None:
+            if not issued_client_id:
+                issued_client_id = client_id_hint
+            elif issued_client_id != client_id_hint:
+                raise RagError("Authorization failed: issued client ID does not match the hint.")
+        else:
+            if not issued_client_id:
+                raise RagError("Authorization failed: no client_id returned.")
 
         token_res = self._http_client.post(
             _TOKEN_URL,
@@ -321,7 +325,7 @@ class ChatGPTAuth:
                 err = token_res.json().get("error")
             except Exception:
                 pass
-            if err == "invalid_grant":
+            if err in ("invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused"):
                 new_creds = self._authorize(creds.ext_agent_host_id, creds.client_id, creds.id_token)
                 if new_creds.subject != creds.subject:
                     raise RagError("Authorization failed: subject mismatch during re-authorization.")

@@ -407,13 +407,14 @@ def test_refresh_failure_preserves_saved_credentials(tmp_path: Path) -> None:
     loaded = store.load()
     assert loaded == creds
 
-def test_expired_refresh_reauthorizes_existing_client(tmp_path: Path) -> None:
+@pytest.mark.parametrize("error_code", ["invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused"])
+def test_expired_refresh_reauthorizes_existing_client(tmp_path: Path, error_code: str) -> None:
     auth, opened_urls, client = create_mock_auth_environment(tmp_path)
 
     original_handler = client._transport.handler
     def invalid_grant(req):
         if req.url.path == "/api/accounts/oauth/token" and b"grant_type=refresh_token" in req.content:
-            return httpx.Response(400, json={"error": "invalid_grant"})
+            return httpx.Response(400, json={"error": error_code})
         return original_handler(req)
 
     client._transport.handler = invalid_grant
@@ -441,6 +442,8 @@ def test_expired_refresh_reauthorizes_existing_client(tmp_path: Path) -> None:
 
     assert query["client_id"][0] == "issued_client_123"
     assert query["id_token_hint"][0] == "mock_id_token_hint"
+    assert query["ext_agent_host_id"][0] == "host123"
+    assert "agent_name_hint" not in query
 
 def test_reauthorization_identity_mismatch_preserves_credentials(tmp_path: Path) -> None:
     auth, opened_urls, client = create_mock_auth_environment(tmp_path)
@@ -685,3 +688,80 @@ def test_refresh_retains_refresh_token_if_omitted(tmp_path: Path) -> None:
     loaded = store.load()
     assert loaded.access_token == "mock_access_token"
     assert loaded.refresh_token == "old_refresh_token" # explicitly retained
+def test_callback_without_client_id_retains_hint_if_provided(tmp_path: Path) -> None:
+    auth, opened_urls, client = create_mock_auth_environment(tmp_path)
+
+    # We need to explicitly call authorize with a hint to trigger reauthorization behavior
+    original_handler = client._transport.handler
+
+    exchanged_client_id = None
+    def missing_client_id_handler(req):
+        nonlocal exchanged_client_id
+        if req.url.path == "/api/accounts/oauth/token" and b"grant_type=authorization_code" in req.content:
+            data = urllib.parse.parse_qs(req.content.decode("utf-8"))
+            exchanged_client_id = data.get("client_id", [""])[0]
+            return original_handler(req)
+        return original_handler(req)
+
+    client._transport.handler = missing_client_id_handler
+
+    # Let's mock the browser handler to drop the client_id entirely in the callback!
+    def mock_browser_no_client_id(url: str) -> bool:
+        opened_urls.append(url)
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        redirect_uri = query.get("redirect_uri", [""])[0]
+        state = query.get("state", [""])[0]
+        nonce = query.get("nonce", [""])[0]
+        httpx.Request._test_nonce = nonce
+
+        def make_request():
+            cb_parsed = urllib.parse.urlparse(redirect_uri)
+            import http.client
+            conn = http.client.HTTPConnection(cb_parsed.netloc)
+            # missing &client_id=...
+            conn.request("GET", f"{cb_parsed.path}?state={state}&code=mock_code")
+            conn.getresponse()
+
+        import threading
+        threading.Thread(target=make_request).start()
+        return True
+
+    auth._browser_open = mock_browser_no_client_id
+
+    # 1. Initial auth -> MUST FAIL because no client_id hint exists and no client_id returned!
+    with pytest.raises(RagError, match="no client_id returned"):
+        auth.get_access_token()
+
+    # 2. Reauth (passing client_id_hint="hint_123") -> SHOULD SUCCEED explicitly using the hint.
+    creds = auth._authorize(host_id="host123", client_id_hint="hint_123")
+    assert exchanged_client_id == "hint_123"
+    assert creds.client_id == "hint_123"
+
+def test_callback_with_mismatched_client_id_fails(tmp_path: Path) -> None:
+    auth, opened_urls, client = create_mock_auth_environment(tmp_path)
+
+    def mock_browser_mismatched_client_id(url: str) -> bool:
+        opened_urls.append(url)
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query)
+        redirect_uri = query.get("redirect_uri", [""])[0]
+        state = query.get("state", [""])[0]
+        nonce = query.get("nonce", [""])[0]
+        httpx.Request._test_nonce = nonce
+
+        def make_request():
+            cb_parsed = urllib.parse.urlparse(redirect_uri)
+            import http.client
+            conn = http.client.HTTPConnection(cb_parsed.netloc)
+            conn.request("GET", f"{cb_parsed.path}?state={state}&code=mock_code&client_id=WRONG_CLIENT")
+            conn.getresponse()
+
+        import threading
+        threading.Thread(target=make_request).start()
+        return True
+
+    auth._browser_open = mock_browser_mismatched_client_id
+
+    with pytest.raises(RagError, match="does not match the hint"):
+        auth._authorize(host_id="host123", client_id_hint="expected_client")
