@@ -76,13 +76,21 @@ class CredentialStore:
         )
 
     def save(self, credentials: ChatGPTCredentials) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if hasattr(os, "chmod"):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(self.path.parent, 0o700)
+            except Exception:
+                pass
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+
         data = asdict(credentials)
         data["scopes"] = list(credentials.scopes)
 
-        temp_path = self.path.with_name(self.path.name + ".tmp")
+        temp_path = self.path.with_name(self.path.name + f".{uuid.uuid4().hex}.tmp")
 
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         mode = 0o600
 
         fd = os.open(temp_path, flags, mode)
@@ -99,10 +107,17 @@ class CredentialStore:
                 return data["ext_agent_host_id"]
 
         host_id = str(uuid.uuid4())
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if hasattr(os, "chmod"):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(self.path.parent, 0o700)
+            except Exception:
+                pass
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        temp_path = self.path.with_name(self.path.name + ".tmp")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        temp_path = self.path.with_name(self.path.name + f".{uuid.uuid4().hex}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         mode = 0o600
 
         fd = os.open(temp_path, flags, mode)
@@ -233,6 +248,8 @@ class ChatGPTAuth:
         issued_client_id = query.get("client_id", [""])[0]
         if not issued_client_id:
             raise RagError("Authorization failed: no client_id returned.")
+        if client_id_hint is not None and issued_client_id != client_id_hint:
+            raise RagError("Authorization failed: issued client ID does not match the hint.")
 
         token_res = self._http_client.post(
             _TOKEN_URL,
@@ -258,7 +275,7 @@ class ChatGPTAuth:
             if "chatgpt.tokens.use.direct" not in scopes_granted:
                 raise RagError("Authorization failed: chatgpt.tokens.use.direct scope was not granted.")
         else:
-            scopes_granted = creds.scopes
+            raise RagError("Authorization failed: scope was not returned.")
 
         return ChatGPTCredentials(
             client_id=issued_client_id,
@@ -358,8 +375,11 @@ class ChatGPTAuth:
                 algorithms=["RS256"],
                 audience=expected_client_id,
                 issuer=issuer,
-                options={"verify_signature": True}
+                options={"verify_signature": True, "require": ["exp", "sub"]}
             )
+
+            if not claims.get("sub"):
+                raise RagError("ID token validation failed: missing or empty subject.")
 
             if expected_nonce and claims.get("nonce") != expected_nonce:
                 raise RagError("ID token validation failed: nonce mismatch.")

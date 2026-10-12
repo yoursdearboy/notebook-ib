@@ -254,7 +254,25 @@ def test_callback_rejects_wrong_state_and_oauth_denial(tmp_path: Path) -> None:
         auth.get_access_token()
 
 def test_initial_callback_uses_issued_client_id_for_exchange(tmp_path: Path) -> None:
-    pass
+    auth, opened_urls, client = create_mock_auth_environment(tmp_path)
+
+    # Store the requested data sent to token exchange
+    exchanged_client_id = None
+    original_handler = client._transport.handler
+
+    def intercept_token(req):
+        nonlocal exchanged_client_id
+        if req.url.path == "/api/accounts/oauth/token":
+            data = urllib.parse.parse_qs(req.content.decode("utf-8"))
+            exchanged_client_id = data.get("client_id", [""])[0]
+        return original_handler(req)
+
+    client._transport.handler = intercept_token
+
+    auth.get_access_token()
+
+    # The callback returns issued_client_123 in the mock
+    assert exchanged_client_id == "issued_client_123"
 
 def test_id_token_requires_valid_signature_and_claims(tmp_path: Path) -> None:
     auth, _, client = create_mock_auth_environment(tmp_path)
@@ -319,7 +337,25 @@ def test_refresh_persists_rotated_tokens(tmp_path: Path) -> None:
     assert new_creds.refresh_token == "mock_refresh_token"
 
 def test_refreshes_within_sixty_seconds_of_expiry(tmp_path: Path) -> None:
-    pass
+    auth, _, client = create_mock_auth_environment(tmp_path)
+
+    creds = ChatGPTCredentials(
+        client_id="issued_client_123",
+        subject="user123",
+        email="test@example.com",
+        id_token="mock_id_token",
+        access_token="old_access_token",
+        refresh_token="old_refresh_token",
+        access_token_expires_at=1059.0, # expires in 59s
+        scopes=frozenset(["chatgpt.tokens.use.direct"]),
+        ext_agent_host_id="host123"
+    )
+    store = CredentialStore(tmp_path / "auth.json")
+    store.save(creds)
+
+    token = auth.get_access_token()
+
+    assert token == "mock_access_token" # was refreshed!
 
 def test_refresh_validates_rotated_id_token(tmp_path: Path) -> None:
     auth, _, client = create_mock_auth_environment(tmp_path)

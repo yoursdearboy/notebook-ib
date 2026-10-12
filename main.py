@@ -30,12 +30,9 @@ from sqlalchemy import create_engine, text as sql_text
 from sqlalchemy.engine import make_url
 from typing_extensions import TypedDict
 
+from errors import RagError
 
 logger = logging.getLogger(__name__)
-
-
-class RagError(Exception):
-    """An expected, safe-to-display application error."""
 
 
 @dataclass(frozen=True)
