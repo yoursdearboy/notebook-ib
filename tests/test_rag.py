@@ -29,7 +29,9 @@ class FakeStore:
 
 
 class FakeModel:
-    def __init__(self, result: Any = "Supported answer [1]", calls: list[str] | None = None) -> None:
+    def __init__(
+        self, result: Any = "Supported answer [1]", calls: list[str] | None = None
+    ) -> None:
         self.result = result
         self.calls = calls if calls is not None else []
         self.prompts: list[Any] = []
@@ -50,9 +52,14 @@ def doc(source: Path, content: str, **metadata: object) -> Document:
     )
 
 
-def test_graph_retrieves_then_generates_once_with_numbered_context(tmp_path: Path) -> None:
+def test_graph_retrieves_then_generates_once_with_numbered_context(
+    tmp_path: Path,
+) -> None:
     calls: list[str] = []
-    documents = [doc(tmp_path / "facts.md", "The comet is blue."), doc(tmp_path / "more.txt", "It passed in May.")]
+    documents = [
+        doc(tmp_path / "facts.md", "The comet is blue."),
+        doc(tmp_path / "more.txt", "It passed in May."),
+    ]
     store = FakeStore(documents, calls)
     model = FakeModel(calls=calls)
 
@@ -101,7 +108,10 @@ def test_provider_failure_is_reported_as_rag_error(tmp_path: Path) -> None:
     [
         ("no usable text", AIMessage(content="  ")),
         ("no usable text", AIMessage(content=[])),
-        ("no usable text", AIMessage(content=[{"type": "refusal", "refusal": "blocked"}])),
+        (
+            "no usable text",
+            AIMessage(content=[{"type": "refusal", "refusal": "blocked"}]),
+        ),
         ("unsupported response shape", object()),
     ],
 )
@@ -118,7 +128,14 @@ def test_empty_blocked_and_unsupported_model_responses_fail_clearly(
 
 def test_text_content_blocks_are_normalized(tmp_path: Path) -> None:
     store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], [])
-    model = FakeModel(AIMessage(content=[{"type": "text", "text": "Supported "}, {"type": "text", "text": "answer [1]"}]))
+    model = FakeModel(
+        AIMessage(
+            content=[
+                {"type": "text", "text": "Supported "},
+                {"type": "text", "text": "answer [1]"},
+            ]
+        )
+    )
 
     result = build_graph(store, model, k=1).invoke({"question": "Question?"})
 
@@ -129,14 +146,19 @@ def test_blocked_response_with_partial_text_is_rejected(tmp_path: Path) -> None:
     store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], [])
     response = AIMessage(
         content="Partial answer [1]",
-        response_metadata={"finish_reason": "SAFETY", "safety_ratings": [{"blocked": True}]},
+        response_metadata={
+            "finish_reason": "SAFETY",
+            "safety_ratings": [{"blocked": True}],
+        },
     )
 
     with pytest.raises(RagError, match="blocked"):
         build_graph(store, FakeModel(response), k=1).invoke({"question": "Question?"})
 
 
-def test_render_uses_metadata_locations_and_lists_every_retrieved_chunk(tmp_path: Path) -> None:
+def test_render_uses_metadata_locations_and_lists_every_retrieved_chunk(
+    tmp_path: Path,
+) -> None:
     first_path = (tmp_path / "manual.pdf").resolve()
     second_path = (tmp_path / "notes.md").resolve()
     state = {
@@ -161,7 +183,9 @@ def test_render_uses_metadata_locations_and_lists_every_retrieved_chunk(tmp_path
 def test_render_truncates_normalized_excerpts_to_240_characters(tmp_path: Path) -> None:
     state = {
         "question": "Question?",
-        "documents": [doc(tmp_path / "long.txt", "word " * 100, line_start=1, line_end=1)],
+        "documents": [
+            doc(tmp_path / "long.txt", "word " * 100, line_start=1, line_end=1)
+        ],
         "answer": "Answer [1]",
     }
 
@@ -172,7 +196,9 @@ def test_render_truncates_normalized_excerpts_to_240_characters(tmp_path: Path) 
     assert excerpt.endswith("...")
 
 
-def test_model_factories_use_explicit_gemini_api_configuration_without_network() -> None:
+def test_model_factories_use_explicit_gemini_api_configuration_without_network() -> (
+    None
+):
     config = Config.from_env(
         {
             "GOOGLE_API_KEY": "local-test-key",

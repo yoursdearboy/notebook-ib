@@ -31,7 +31,11 @@ def make_text_pdf(path: Path, pages: list[str]) -> None:
             f"<< /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>".encode()
         )
         objects.append(
-            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
+            b"<< /Length "
+            + str(len(stream)).encode()
+            + b" >>\nstream\n"
+            + stream
+            + b"\nendstream"
         )
     pdf = bytearray(b"%PDF-1.4\n")
     offsets = [0]
@@ -42,7 +46,9 @@ def make_text_pdf(path: Path, pages: list[str]) -> None:
     pdf.extend(f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode())
     for offset in offsets[1:]:
         pdf.extend(f"{offset:010} 00000 n \n".encode())
-    pdf.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
+    pdf.extend(
+        f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()
+    )
     path.write_bytes(pdf)
 
 
@@ -87,14 +93,21 @@ def test_pdf_chunks_include_one_based_page_numbers(tmp_path: Path) -> None:
     chunks = prepare_chunks(pdf, config())
 
     assert [chunk.metadata["page"] for chunk in chunks] == [1, 2]
-    assert [chunk.page_content.strip() for chunk in chunks] == ["first page fact", "second page fact"]
+    assert [chunk.page_content.strip() for chunk in chunks] == [
+        "first page fact",
+        "second page fact",
+    ]
     assert [chunk.metadata["chunk_index"] for chunk in chunks] == [0, 1]
     assert len({chunk.id for chunk in chunks}) == len(chunks)
 
 
-def test_repeated_paragraphs_and_crlf_unicode_keep_occurrence_locations(tmp_path: Path) -> None:
+def test_repeated_paragraphs_and_crlf_unicode_keep_occurrence_locations(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "repeated.txt"
-    source.write_bytes("\r\nПовтор\r\nстрока\r\n\r\nПовтор\r\nстрока\r\n".encode("utf-8"))
+    source.write_bytes(
+        "\r\nПовтор\r\nстрока\r\n\r\nПовтор\r\nстрока\r\n".encode("utf-8")
+    )
 
     chunks = prepare_chunks(source, config(CHUNK_SIZE="20", CHUNK_OVERLAP="0"))
     first, second = chunks
@@ -107,14 +120,19 @@ def test_repeated_paragraphs_and_crlf_unicode_keep_occurrence_locations(tmp_path
     assert all(chunk.metadata["source"] == str(source.resolve()) for chunk in chunks)
 
 
-def test_repeated_overlap_uses_the_later_occurrence_for_line_ranges(tmp_path: Path) -> None:
+def test_repeated_overlap_uses_the_later_occurrence_for_line_ranges(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "overlapping-repeats.txt"
     content = "\n\naa\n\na\nlonglonglongb \n\nlonglonglong b"
     source.write_text(content, encoding="utf-8")
 
     chunks = prepare_chunks(source, config(CHUNK_SIZE="15", CHUNK_OVERLAP="12"))
     assert [chunk.page_content for chunk in chunks[:2]] == ["\n\naa", "\n\na"]
-    assert [(chunk.metadata["line_start"], chunk.metadata["line_end"]) for chunk in chunks[:2]] == [
+    assert [
+        (chunk.metadata["line_start"], chunk.metadata["line_end"])
+        for chunk in chunks[:2]
+    ] == [
         (1, 3),
         (3, 5),
     ]
@@ -163,7 +181,9 @@ def test_invalid_utf8_and_corrupt_pdf_are_rejected(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", ["missing.txt", "unsupported.csv"])
-def test_missing_and_explicit_unsupported_files_are_rejected(tmp_path: Path, path: str) -> None:
+def test_missing_and_explicit_unsupported_files_are_rejected(
+    tmp_path: Path, path: str
+) -> None:
     with pytest.raises(RagError):
         prepare_chunks(tmp_path / path, config())
 
@@ -192,7 +212,9 @@ def test_discovery_skips_unsupported_files_and_is_sorted(tmp_path: Path) -> None
         {"RETRIEVAL_K": "0"},
     ],
 )
-def test_invalid_chunk_and_retrieval_settings_are_rejected(overrides: dict[str, str]) -> None:
+def test_invalid_chunk_and_retrieval_settings_are_rejected(
+    overrides: dict[str, str],
+) -> None:
     with pytest.raises(RagError):
         config(**overrides)
 
@@ -206,7 +228,9 @@ def test_config_repr_does_not_include_secret() -> None:
     assert "db-secret" not in repr(configured)
 
 
-def test_dotenv_values_do_not_override_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_dotenv_values_do_not_override_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     (tmp_path / ".env").write_text("CHUNK_SIZE=10\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CHUNK_SIZE", "120")

@@ -27,7 +27,9 @@ def _safe_message(message: str, config: Config) -> str:
     try:
         configured_url = make_url(config.database_url)
         if configured_url.password:
-            hidden_url = configured_url.set(password="[redacted]").render_as_string(hide_password=False)
+            hidden_url = configured_url.set(password="[redacted]").render_as_string(
+                hide_password=False
+            )
             safe = safe.replace(config.database_url, hidden_url)
     except Exception:
         pass
@@ -42,7 +44,13 @@ def _report_error(message: str, config: Config, category: str = "Error") -> None
     print(f"{category}: {_safe_message(message, config)}", file=sys.stderr)
 
 
-def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embeddings, fresh: bool = False) -> int:
+def index_path(
+    path: Path,
+    config: Config,
+    store: IndexStore,
+    embeddings: Embeddings,
+    fresh: bool = False,
+) -> int:
     try:
         files = discover_files(path)
     except RagError as exc:
@@ -63,31 +71,55 @@ def index_path(path: Path, config: Config, store: IndexStore, embeddings: Embedd
             _report_error(f"Failed {source}: {exc}", config, "File error")
             continue
         try:
-            vectors = embeddings.embed_documents([chunk.page_content for chunk in chunks])
+            vectors = embeddings.embed_documents(
+                [chunk.page_content for chunk in chunks]
+            )
         except Exception as exc:
             failed += 1
-            logger.error("Embedding failed for %s: %s", source, _safe_message(str(exc), config))
-            _report_error(f"Failed {source}: embedding failed; the previous source version was preserved.", config, "Provider error")
+            logger.error(
+                "Embedding failed for %s: %s", source, _safe_message(str(exc), config)
+            )
+            _report_error(
+                f"Failed {source}: embedding failed; the previous source version was preserved.",
+                config,
+                "Provider error",
+            )
             continue
         try:
             store.replace_source(chunks, vectors)
         except Exception as exc:
             failed += 1
-            logger.error("Database replacement failed for %s: %s", source, _safe_message(str(exc), config))
-            _report_error(f"Failed {source}: database replacement failed; the previous source version was preserved.", config, "Database error")
+            logger.error(
+                "Database replacement failed for %s: %s",
+                source,
+                _safe_message(str(exc), config),
+            )
+            _report_error(
+                f"Failed {source}: database replacement failed; the previous source version was preserved.",
+                config,
+                "Database error",
+            )
             continue
         succeeded += 1
         total_chunks += len(chunks)
         print(f"Indexed {source}: {len(chunks)} chunks.")
-    print(f"Indexing summary: {succeeded} files succeeded, {failed} failed, {total_chunks} chunks indexed.")
+    print(
+        f"Indexing summary: {succeeded} files succeeded, {failed} failed, {total_chunks} chunks indexed."
+    )
     return failed
 
 
 def _create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Index local documents and answer questions with source references.")
+    parser = argparse.ArgumentParser(
+        description="Index local documents and answer questions with source references."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    index_parser = commands.add_parser("index", help="Index a file or recursively scan a directory")
-    index_parser.add_argument("path", type=Path, help="Text, Markdown, PDF, or directory of supported files")
+    index_parser = commands.add_parser(
+        "index", help="Index a file or recursively scan a directory"
+    )
+    index_parser.add_argument(
+        "path", type=Path, help="Text, Markdown, PDF, or directory of supported files"
+    )
     index_parser.add_argument(
         "--fresh",
         action="store_true",
@@ -104,7 +136,9 @@ def _create_parser() -> argparse.ArgumentParser:
         default="eng",
         help="Comma-separated language codes for Unstructured OCR (default: eng)",
     )
-    ask_parser = commands.add_parser("ask", help="Ask a question about indexed documents")
+    ask_parser = commands.add_parser(
+        "ask", help="Ask a question about indexed documents"
+    )
     ask_parser.add_argument("question", help="A standalone question")
     return parser
 
@@ -136,7 +170,9 @@ def main(argv: list[str] | None = None) -> int:
             embeddings = create_embeddings(config)
             stage = "database"
             store = IndexStore(config, embeddings)
-            failures = index_path(args.path, config, store, embeddings, fresh=args.fresh)
+            failures = index_path(
+                args.path, config, store, embeddings, fresh=args.fresh
+            )
             return 1 if failures else 0
 
         deferred_embeddings = _DeferredEmbeddings(lambda: create_embeddings(config))
@@ -146,25 +182,54 @@ def main(argv: list[str] | None = None) -> int:
         stage = "provider"
         model = create_chat_model(config)
         stage = "rag"
-        state = build_graph(store, model, config.retrieval_k).invoke({"question": args.question})
+        state = build_graph(store, model, config.retrieval_k).invoke(
+            {"question": args.question}
+        )
         print(render_result(state))
         return 0
     except RagError as exc:
         message = str(exc)
         lower = message.lower()
-        if stage == "database" or (stage == "rag" and any(token in lower for token in ("database", "postgres", "index", "indexed"))):
+        if stage == "database" or (
+            stage == "rag"
+            and any(
+                token in lower for token in ("database", "postgres", "index", "indexed")
+            )
+        ):
             category = "Database error"
-        elif stage == "provider" or (stage == "rag" and any(token in lower for token in ("google", "provider", "embedding", "generation", "chat model"))):
+        elif stage == "provider" or (
+            stage == "rag"
+            and any(
+                token in lower
+                for token in (
+                    "google",
+                    "provider",
+                    "embedding",
+                    "generation",
+                    "chat model",
+                )
+            )
+        ):
             category = "Provider error"
         else:
             category = "Error"
         _report_error(message, config, category)
         return 1
     except Exception:
-        category = "Database error" if stage == "database" else (
-            "Provider error" if stage == "provider" or args.command == "ask" else "Indexing error"
+        category = (
+            "Database error"
+            if stage == "database"
+            else (
+                "Provider error"
+                if stage == "provider" or args.command == "ask"
+                else "Indexing error"
+            )
         )
-        _report_error("The request could not be completed; check provider and database settings.", config, category)
+        _report_error(
+            "The request could not be completed; check provider and database settings.",
+            config,
+            category,
+        )
         return 1
     finally:
         if store is not None:

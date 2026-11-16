@@ -25,7 +25,11 @@ def discover_files(path: Path) -> list[Path]:
     if not path.is_dir():
         raise RagError(f"Path is not a file or directory: {path}")
     return sorted(
-        (item.resolve() for item in path.rglob("*") if item.is_file() and item.suffix.lower() in {".txt", ".md", ".pdf"}),
+        (
+            item.resolve()
+            for item in path.rglob("*")
+            if item.is_file() and item.suffix.lower() in {".txt", ".md", ".pdf"}
+        ),
         key=lambda item: str(item),
     )
 
@@ -49,6 +53,7 @@ def _load_pdf_pages(source: Path, config: Config) -> list[Document]:
 
     try:
         from langchain_community.document_loaders import UnstructuredPDFLoader
+
         elements = UnstructuredPDFLoader(
             str(source),
             mode="elements",
@@ -71,7 +76,9 @@ def _load_pdf_pages(source: Path, config: Config) -> list[Document]:
                 f"PDF loader '{config.pdf_loader}' did not provide page numbers for {source}."
             ) from exc
         if page < 1:
-            raise RagError(f"PDF loader '{config.pdf_loader}' returned an invalid page for {source}.")
+            raise RagError(
+                f"PDF loader '{config.pdf_loader}' returned an invalid page for {source}."
+            )
         pages.setdefault(page, []).append(element.page_content)
 
     return [
@@ -80,8 +87,16 @@ def _load_pdf_pages(source: Path, config: Config) -> list[Document]:
     ]
 
 
-def _split_text(text: str, *, source: Path, source_hash: str, signature: str, config: Config,
-                page: int | None = None, ordinal_start: int = 0) -> list[Document]:
+def _split_text(
+    text: str,
+    *,
+    source: Path,
+    source_hash: str,
+    signature: str,
+    config: Config,
+    page: int | None = None,
+    ordinal_start: int = 0,
+) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=config.chunk_size,
         chunk_overlap=config.chunk_overlap,
@@ -118,7 +133,11 @@ def _split_text(text: str, *, source: Path, source_hash: str, signature: str, co
             metadata["page"] = page
         else:
             metadata["line_start"] = text.count("\n", 0, start) + 1
-            metadata["line_end"] = max(metadata["line_start"], text.count("\n", 0, end) + (1 if end > start and text[end - 1] != "\n" else 0))
+            metadata["line_end"] = max(
+                metadata["line_start"],
+                text.count("\n", 0, end)
+                + (1 if end > start and text[end - 1] != "\n" else 0),
+            )
         chunks.append(
             Document(
                 id=str(uuid.uuid5(namespace, identity)),
@@ -149,14 +168,25 @@ def prepare_chunks(path: Path, config: Config) -> list[Document]:
                 if page_text.strip():
                     page = int(page_document.metadata["page"]) + 1
                     chunks.extend(
-                        _split_text(page_text, source=source, source_hash=source_hash,
-                                    signature=signature, config=config, page=page,
-                                    ordinal_start=len(chunks))
+                        _split_text(
+                            page_text,
+                            source=source,
+                            source_hash=source_hash,
+                            signature=signature,
+                            config=config,
+                            page=page,
+                            ordinal_start=len(chunks),
+                        )
                     )
         else:
             text = raw.decode("utf-8")
-            chunks = _split_text(text, source=source, source_hash=source_hash,
-                                 signature=signature, config=config)
+            chunks = _split_text(
+                text,
+                source=source,
+                source_hash=source_hash,
+                signature=signature,
+                config=config,
+            )
     except UnicodeDecodeError as exc:
         raise RagError(f"Could not decode {source} as UTF-8.") from exc
     except RagError:

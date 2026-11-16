@@ -45,9 +45,18 @@ class Config:
         try:
             # Keep existing .env files that set GOOGLE_EMBEDDING_MODEL working,
             # while new configurations default to local Hugging Face embeddings.
-            embedding_provider = (values.get("EMBEDDING_PROVIDER") or (
-                "google" if "GOOGLE_EMBEDDING_MODEL" in values else "huggingface"
-            )).strip().lower()
+            embedding_provider = (
+                (
+                    values.get("EMBEDDING_PROVIDER")
+                    or (
+                        "google"
+                        if "GOOGLE_EMBEDDING_MODEL" in values
+                        else "huggingface"
+                    )
+                )
+                .strip()
+                .lower()
+            )
             default_embedding_model = (
                 "gemini-embedding-2-preview"
                 if embedding_provider == "google"
@@ -83,23 +92,31 @@ class Config:
                 ),
             )
         except (TypeError, ValueError) as exc:
-            raise RagError("Configuration values for dimensions and chunk settings must be integers.") from exc
+            raise RagError(
+                "Configuration values for dimensions and chunk settings must be integers."
+            ) from exc
         if configured.embedding_dimension <= 0:
             raise RagError("EMBEDDING_DIMENSION must be positive.")
         if configured.embedding_provider not in {"google", "huggingface"}:
-            raise RagError("EMBEDDING_PROVIDER must be either 'google' or 'huggingface'.")
+            raise RagError(
+                "EMBEDDING_PROVIDER must be either 'google' or 'huggingface'."
+            )
         if not configured.embedding_model.strip():
             raise RagError("EMBEDDING_MODEL must not be blank.")
         if configured.chunk_size <= 0:
             raise RagError("CHUNK_SIZE must be positive.")
         if not 0 <= configured.chunk_overlap < configured.chunk_size:
-            raise RagError("CHUNK_OVERLAP must be at least zero and smaller than CHUNK_SIZE.")
+            raise RagError(
+                "CHUNK_OVERLAP must be at least zero and smaller than CHUNK_SIZE."
+            )
         if configured.retrieval_k <= 0:
             raise RagError("RETRIEVAL_K must be positive.")
         if configured.pdf_loader not in {"pypdf", "unstructured"}:
             raise RagError("--pdf-loader must be either 'pypdf' or 'unstructured'.")
         if not configured.pdf_ocr_languages:
-            raise RagError("--pdf-ocr-languages must contain at least one language code.")
+            raise RagError(
+                "--pdf-ocr-languages must contain at least one language code."
+            )
         return configured
 
     @property

@@ -15,7 +15,9 @@ from notebook.rag import IndexStore
 
 
 TEST_DATABASE_URL = os.environ.get("RAG_TEST_DATABASE_URL")
-TEST_DATABASE_ISOLATED = bool(TEST_DATABASE_URL and urlparse(TEST_DATABASE_URL).path.endswith("/rag_test"))
+TEST_DATABASE_ISOLATED = bool(
+    TEST_DATABASE_URL and urlparse(TEST_DATABASE_URL).path.endswith("/rag_test")
+)
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_ISOLATED,
     reason="Set RAG_TEST_DATABASE_URL to a dedicated database named rag_test; storage tests never reset the app database.",
@@ -28,7 +30,10 @@ class FakeEmbeddings(Embeddings):
         self.calls: list[str] = []
 
     def _vector(self, text_value: str) -> list[float]:
-        return [float((sum(text_value.encode("utf-8")) + index) % 13 + 1) for index in range(self.dimensions)]
+        return [
+            float((sum(text_value.encode("utf-8")) + index) % 13 + 1)
+            for index in range(self.dimensions)
+        ]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         self.calls.extend(texts)
@@ -44,10 +49,14 @@ def reset_dedicated_test_database() -> None:
     assert TEST_DATABASE_URL
     engine = create_engine(TEST_DATABASE_URL)
     with engine.begin() as connection:
-        connection.execute(text("DROP TABLE IF EXISTS rag_chunks, rag_index_config CASCADE"))
+        connection.execute(
+            text("DROP TABLE IF EXISTS rag_chunks, rag_index_config CASCADE")
+        )
     yield
     with engine.begin() as connection:
-        connection.execute(text("DROP TABLE IF EXISTS rag_chunks, rag_index_config CASCADE"))
+        connection.execute(
+            text("DROP TABLE IF EXISTS rag_chunks, rag_index_config CASCADE")
+        )
     engine.dispose()
 
 
@@ -66,7 +75,12 @@ def document(source: str, content: str, index: int = 0) -> Document:
     return Document(
         id=f"00000000-0000-0000-0000-{index + 1:012d}",
         page_content=content,
-        metadata={"source": source, "source_hash": f"hash-{source}", "chunk_index": index, "line_start": 1},
+        metadata={
+            "source": source,
+            "source_hash": f"hash-{source}",
+            "chunk_index": index,
+            "line_start": 1,
+        },
     )
 
 
@@ -103,7 +117,9 @@ def test_multipage_pdf_chunks_persist_with_unique_ids(tmp_path) -> None:
         vectors = [embeddings._vector(chunk.page_content) for chunk in chunks]
         store.replace_source(chunks, vectors)
         with store._sql_engine.connect() as connection:
-            count = connection.execute(text("SELECT count(*) FROM rag_chunks")).scalar_one()
+            count = connection.execute(
+                text("SELECT count(*) FROM rag_chunks")
+            ).scalar_one()
     finally:
         store.close()
 
@@ -115,10 +131,18 @@ def test_replacing_a_source_removes_chunks_left_from_its_longer_version() -> Non
     store = IndexStore(make_config(), embeddings)
     try:
         store.initialize()
-        old_documents = [document("/docs/shorten.txt", f"old chunk {index}", index) for index in range(5)]
-        store.replace_source(old_documents, [embeddings._vector(doc.page_content) for doc in old_documents])
+        old_documents = [
+            document("/docs/shorten.txt", f"old chunk {index}", index)
+            for index in range(5)
+        ]
+        store.replace_source(
+            old_documents,
+            [embeddings._vector(doc.page_content) for doc in old_documents],
+        )
         replacement = document("/docs/shorten.txt", "new short content")
-        store.replace_source([replacement], [embeddings._vector(replacement.page_content)])
+        store.replace_source(
+            [replacement], [embeddings._vector(replacement.page_content)]
+        )
         results = store.search("new short content", 4)
     finally:
         store.close()
@@ -135,8 +159,16 @@ def test_failed_database_insert_rolls_back_source_replacement() -> None:
         previous = document("/docs/atomic.txt", "previous version")
         store.replace_source([previous], [embeddings._vector(previous.page_content)])
         with engine.begin() as connection:
-            connection.execute(text("CREATE FUNCTION reject_rag_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.content = 'explode' THEN RAISE EXCEPTION 'forced insertion failure'; END IF; RETURN NEW; END $$"))
-            connection.execute(text("CREATE TRIGGER reject_rag_insert BEFORE INSERT ON rag_chunks FOR EACH ROW EXECUTE FUNCTION reject_rag_insert()"))
+            connection.execute(
+                text(
+                    "CREATE FUNCTION reject_rag_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.content = 'explode' THEN RAISE EXCEPTION 'forced insertion failure'; END IF; RETURN NEW; END $$"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TRIGGER reject_rag_insert BEFORE INSERT ON rag_chunks FOR EACH ROW EXECUTE FUNCTION reject_rag_insert()"
+                )
+            )
         failing = document("/docs/atomic.txt", "explode")
 
         with pytest.raises(RagError, match="replace"):
@@ -144,7 +176,9 @@ def test_failed_database_insert_rolls_back_source_replacement() -> None:
         results = store.search("previous version", 4)
     finally:
         with engine.begin() as connection:
-            connection.execute(text("DROP TRIGGER IF EXISTS reject_rag_insert ON rag_chunks"))
+            connection.execute(
+                text("DROP TRIGGER IF EXISTS reject_rag_insert ON rag_chunks")
+            )
             connection.execute(text("DROP FUNCTION IF EXISTS reject_rag_insert()"))
         store.close()
         engine.dispose()
@@ -162,7 +196,9 @@ def test_replacing_a_source_keeps_other_sources() -> None:
         store.replace_source([alpha], [embeddings._vector(alpha.page_content)])
         store.replace_source([beta], [embeddings._vector(beta.page_content)])
         replacement = document("/docs/alpha.txt", "alpha revised")
-        store.replace_source([replacement], [embeddings._vector(replacement.page_content)])
+        store.replace_source(
+            [replacement], [embeddings._vector(replacement.page_content)]
+        )
         rows = store.search("beta text", 4)
     finally:
         store.close()
@@ -177,7 +213,9 @@ def test_replacing_a_source_keeps_other_sources() -> None:
         {"EMBEDDING_DIMENSION": "4"},
     ],
 )
-def test_model_or_dimension_mismatch_fails_before_embedding(overrides: dict[str, str]) -> None:
+def test_model_or_dimension_mismatch_fails_before_embedding(
+    overrides: dict[str, str],
+) -> None:
     embeddings = FakeEmbeddings()
     store = IndexStore(make_config(), embeddings)
     store.initialize()
@@ -218,7 +256,9 @@ def test_invalid_vector_count_and_dimension_are_rejected_before_mutation() -> No
         existing = document("/docs/validation.txt", "keep me")
         store.replace_source([existing], [embeddings._vector(existing.page_content)])
         with pytest.raises(RagError, match="dimension"):
-            store.replace_source([document("/docs/validation.txt", "bad vector")], [[1.0, 2.0]])
+            store.replace_source(
+                [document("/docs/validation.txt", "bad vector")], [[1.0, 2.0]]
+            )
         results = store.search("keep me", 2)
     finally:
         store.close()

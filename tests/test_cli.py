@@ -40,7 +40,9 @@ class FakeStore:
     def check_compatible(self) -> None:
         self.events.append("check-compatible")
 
-    def replace_source(self, chunks: list[Document], vectors: list[list[float]]) -> None:
+    def replace_source(
+        self, chunks: list[Document], vectors: list[list[float]]
+    ) -> None:
         self.replacements.append((chunks, vectors))
         self.documents = chunks
 
@@ -63,7 +65,9 @@ def set_config_env(monkeypatch: pytest.MonkeyPatch, **values: str) -> None:
         monkeypatch.setenv(key, value)
 
 
-def test_missing_subcommand_shows_usage_and_returns_argument_error(capsys: pytest.CaptureFixture[str]) -> None:
+def test_missing_subcommand_shows_usage_and_returns_argument_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     result = app.main([])
     captured = capsys.readouterr()
 
@@ -75,8 +79,14 @@ def test_blank_question_fails_before_service_factories(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     set_config_env(monkeypatch)
-    monkeypatch.setattr(app, "create_embeddings", lambda config: pytest.fail("embeddings factory called"))
-    monkeypatch.setattr(app, "create_chat_model", lambda config: pytest.fail("chat factory called"))
+    monkeypatch.setattr(
+        app,
+        "create_embeddings",
+        lambda config: pytest.fail("embeddings factory called"),
+    )
+    monkeypatch.setattr(
+        app, "create_chat_model", lambda config: pytest.fail("chat factory called")
+    )
     monkeypatch.setattr(app, "IndexStore", lambda *args: pytest.fail("store created"))
 
     result = app.main(["ask", "   "])
@@ -89,8 +99,14 @@ def test_missing_credentials_fails_before_service_factories(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     set_config_env(monkeypatch, GOOGLE_API_KEY="")
-    monkeypatch.setattr(app, "create_embeddings", lambda config: pytest.fail("embeddings factory called"))
-    monkeypatch.setattr(app, "create_chat_model", lambda config: pytest.fail("chat factory called"))
+    monkeypatch.setattr(
+        app,
+        "create_embeddings",
+        lambda config: pytest.fail("embeddings factory called"),
+    )
+    monkeypatch.setattr(
+        app, "create_chat_model", lambda config: pytest.fail("chat factory called")
+    )
     monkeypatch.setattr(app, "IndexStore", lambda *args: pytest.fail("store created"))
 
     result = app.main(["ask", "What is in the index?"])
@@ -159,8 +175,12 @@ def test_embedding_failure_does_not_replace_existing_source(
     source = tmp_path / "keep.txt"
     source.write_text("Updated content.\n", encoding="utf-8")
     store = FakeStore()
-    store.documents = [Document(id="old", page_content="old version", metadata={"source": str(source)})]
-    monkeypatch.setattr(app, "create_embeddings", lambda config: FakeEmbeddings(fail=True))
+    store.documents = [
+        Document(id="old", page_content="old version", metadata={"source": str(source)})
+    ]
+    monkeypatch.setattr(
+        app, "create_embeddings", lambda config: FakeEmbeddings(fail=True)
+    )
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
 
     result = app.main(["index", str(source)])
@@ -208,7 +228,17 @@ def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
     set_config_env(monkeypatch)
     events: list[str] = []
     store = FakeStore(events)
-    store.documents = [Document(id="one", page_content="Fact from a file.", metadata={"source": str(tmp_path / "fact.txt"), "line_start": 1, "line_end": 1})]
+    store.documents = [
+        Document(
+            id="one",
+            page_content="Fact from a file.",
+            metadata={
+                "source": str(tmp_path / "fact.txt"),
+                "line_start": 1,
+                "line_end": 1,
+            },
+        )
+    ]
 
     def make_embeddings(config: Config) -> FakeEmbeddings:
         events.append("embeddings")
@@ -243,7 +273,12 @@ def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
     captured = capsys.readouterr()
 
     assert result == 0, f"{captured.err} events={events!r}"
-    assert events.index("check-compatible") < events.index("chat") < events.index("embeddings") < events.index("generate")
+    assert (
+        events.index("check-compatible")
+        < events.index("chat")
+        < events.index("embeddings")
+        < events.index("generate")
+    )
     assert "Retrieved references" in captured.out
     assert "fact.txt" in captured.out
     assert events[-1] == "close"
@@ -261,7 +296,9 @@ def test_cli_errors_redact_api_keys_and_database_passwords(
     monkeypatch.setattr(
         app,
         "create_chat_model",
-        lambda config: (_ for _ in ()).throw(RagError(f"model failed {secret_key} at {secret_url}")),
+        lambda config: (_ for _ in ()).throw(
+            RagError(f"model failed {secret_key} at {secret_url}")
+        ),
     )
 
     result = app.main(["ask", "Question?"])

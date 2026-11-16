@@ -48,7 +48,9 @@ def create_embeddings(config: Config) -> Embeddings:
     except RagError:
         raise
     except Exception as exc:
-        raise RagError("Could not configure Google embeddings; check the API key and model settings.") from exc
+        raise RagError(
+            "Could not configure Google embeddings; check the API key and model settings."
+        ) from exc
 
 
 class _DeferredEmbeddings(Embeddings):

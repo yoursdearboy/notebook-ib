@@ -22,7 +22,9 @@ def create_chat_model(config: Config) -> BaseChatModel:
             retries=2,
         )
     except Exception as exc:
-        raise RagError("Could not configure the Google chat model; check the API key and model settings.") from exc
+        raise RagError(
+            "Could not configure the Google chat model; check the API key and model settings."
+        ) from exc
 
 
 def _normalize_model_content(response: object) -> str:
@@ -42,18 +44,24 @@ def _normalize_model_content(response: object) -> str:
             for rating in safety_ratings
         ):
             raise RagError("The chat model response was blocked by safety settings.")
-    content = response if isinstance(response, str) else getattr(response, "content", None)
+    content = (
+        response if isinstance(response, str) else getattr(response, "content", None)
+    )
     if isinstance(content, str):
         normalized = content
     elif isinstance(content, list):
         text_blocks = [
             block["text"]
             for block in content
-            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
         ]
         normalized = "".join(text_blocks)
     else:
         raise RagError("The chat model returned an unsupported response shape.")
     if not normalized.strip():
-        raise RagError("The chat model returned no usable text; the response may have been blocked.")
+        raise RagError(
+            "The chat model returned no usable text; the response may have been blocked."
+        )
     return normalized
