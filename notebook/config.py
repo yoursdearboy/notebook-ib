@@ -6,11 +6,7 @@ from typing import Mapping
 
 from dotenv import load_dotenv
 
-__all__ = ["Config", "RagError"]
-
-
-class RagError(Exception):
-    """An expected, safe-to-display application error."""
+__all__ = ["Config"]
 
 
 @dataclass(frozen=True)
