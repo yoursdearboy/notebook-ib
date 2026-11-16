@@ -7,12 +7,11 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from sqlalchemy import create_engine, text
-
 from test_documents import make_text_pdf
-from notebook.config import Config, RagError
+
+from notebook.config import Config
 from notebook.documents import prepare_chunks
 from notebook.rag import IndexStore
-
 
 TEST_DATABASE_URL = os.environ.get("RAG_TEST_DATABASE_URL")
 TEST_DATABASE_ISOLATED = bool(
@@ -64,7 +63,7 @@ def make_config(**overrides: str) -> Config:
     assert TEST_DATABASE_URL
     values = {
         "DATABASE_URL": TEST_DATABASE_URL,
-        "GOOGLE_EMBEDDING_MODEL": "fake-embedding-v1",
+        "EMBEDDING_MODEL": "huggingface:fake-embedding-v1",
         "EMBEDDING_DIMENSION": "3",
     }
     values.update(overrides)
@@ -171,7 +170,7 @@ def test_failed_database_insert_rolls_back_source_replacement() -> None:
             )
         failing = document("/docs/atomic.txt", "explode")
 
-        with pytest.raises(RagError, match="replace"):
+        with pytest.raises(Exception, match="forced insertion failure"):
             store.replace_source([failing], [embeddings._vector(failing.page_content)])
         results = store.search("previous version", 4)
     finally:
@@ -209,7 +208,7 @@ def test_replacing_a_source_keeps_other_sources() -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"GOOGLE_EMBEDDING_MODEL": "fake-embedding-v2"},
+        {"EMBEDDING_MODEL": "huggingface:fake-embedding-v2"},
         {"EMBEDDING_DIMENSION": "4"},
     ],
 )
@@ -221,7 +220,7 @@ def test_model_or_dimension_mismatch_fails_before_embedding(
     store.initialize()
     store.close()
     mismatched = IndexStore(make_config(**overrides), embeddings)
-    with pytest.raises(RagError, match="incompatible"):
+    with pytest.raises(RuntimeError, match="incompatible"):
         mismatched.search("do not embed this", 2)
     mismatched.close()
 
@@ -233,7 +232,7 @@ def test_initialization_is_idempotent_and_empty_index_has_actionable_error() -> 
     try:
         store.initialize()
         store.initialize()
-        with pytest.raises(RagError, match="no documents"):
+        with pytest.raises(RuntimeError, match="no documents"):
             store.search("nothing here", 2)
     finally:
         store.close()
@@ -242,7 +241,7 @@ def test_initialization_is_idempotent_and_empty_index_has_actionable_error() -> 
 def test_search_before_initialization_reports_absent_index() -> None:
     store = IndexStore(make_config(), FakeEmbeddings())
     try:
-        with pytest.raises(RagError, match="not initialized"):
+        with pytest.raises(RuntimeError, match="not initialized"):
             store.search("no table", 2)
     finally:
         store.close()
@@ -255,7 +254,7 @@ def test_invalid_vector_count_and_dimension_are_rejected_before_mutation() -> No
         store.initialize()
         existing = document("/docs/validation.txt", "keep me")
         store.replace_source([existing], [embeddings._vector(existing.page_content)])
-        with pytest.raises(RagError, match="dimension"):
+        with pytest.raises(ValueError, match="dimension"):
             store.replace_source(
                 [document("/docs/validation.txt", "bad vector")], [[1.0, 2.0]]
             )

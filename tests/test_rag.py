@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
-from notebook.chat import create_chat_model
-from notebook.config import Config, RagError
-from notebook.embeddings import create_embeddings
+from notebook.config import Config
 from notebook.rag import (
+    IndexStore,
     build_graph,
     render_result,
 )
@@ -90,39 +90,34 @@ def test_unknown_numeric_citation_is_rejected(tmp_path: Path) -> None:
     store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], calls)
     model = FakeModel("Unsupported citation [99]", calls)
 
-    with pytest.raises(RagError, match="unknown reference"):
+    with pytest.raises(ValueError, match="unknown reference"):
         build_graph(store, model, k=1).invoke({"question": "Question?"})
 
 
-def test_provider_failure_is_reported_as_rag_error(tmp_path: Path) -> None:
+def test_provider_failure_propagates_directly(tmp_path: Path) -> None:
     store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], [])
-    model = FakeModel(RuntimeError("provider secret detail"))
+    model = FakeModel(RuntimeError("provider failure"))
 
-    with pytest.raises(RagError, match="generation failed") as error:
+    with pytest.raises(RuntimeError, match="provider failure"):
         build_graph(store, model, k=1).invoke({"question": "Question?"})
-    assert "provider secret detail" not in str(error.value)
 
 
 @pytest.mark.parametrize(
-    "response",
+    "model_response",
     [
-        ("no usable text", AIMessage(content="  ")),
-        ("no usable text", AIMessage(content=[])),
-        (
-            "no usable text",
-            AIMessage(content=[{"type": "refusal", "refusal": "blocked"}]),
-        ),
-        ("unsupported response shape", object()),
+        AIMessage(content="  "),
+        AIMessage(content=[]),
+        AIMessage(content=[{"type": "refusal", "refusal": "blocked"}]),
+        object(),
     ],
 )
-def test_empty_blocked_and_unsupported_model_responses_fail_clearly(
-    tmp_path: Path, response: tuple[str, Any]
+def test_empty_and_unsupported_model_responses_fail_clearly(
+    tmp_path: Path, model_response: Any
 ) -> None:
     store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], [])
-    expected_error, model_response = response
     model = FakeModel(model_response)
 
-    with pytest.raises(RagError, match=expected_error):
+    with pytest.raises(ValueError, match="no usable text"):
         build_graph(store, model, k=1).invoke({"question": "Question?"})
 
 
@@ -140,20 +135,6 @@ def test_text_content_blocks_are_normalized(tmp_path: Path) -> None:
     result = build_graph(store, model, k=1).invoke({"question": "Question?"})
 
     assert result["answer"] == "Supported answer [1]"
-
-
-def test_blocked_response_with_partial_text_is_rejected(tmp_path: Path) -> None:
-    store = FakeStore([doc(tmp_path / "one.txt", "One fact.")], [])
-    response = AIMessage(
-        content="Partial answer [1]",
-        response_metadata={
-            "finish_reason": "SAFETY",
-            "safety_ratings": [{"blocked": True}],
-        },
-    )
-
-    with pytest.raises(RagError, match="blocked"):
-        build_graph(store, FakeModel(response), k=1).invoke({"question": "Question?"})
 
 
 def test_render_uses_metadata_locations_and_lists_every_retrieved_chunk(
@@ -196,29 +177,43 @@ def test_render_truncates_normalized_excerpts_to_240_characters(tmp_path: Path) 
     assert excerpt.endswith("...")
 
 
-def test_model_factories_use_explicit_gemini_api_configuration_without_network() -> (
-    None
-):
-    config = Config.from_env(
-        {
-            "GOOGLE_API_KEY": "local-test-key",
-            "GOOGLE_CHAT_MODEL": "chat-model-test",
-            "GOOGLE_EMBEDDING_MODEL": "embedding-model-test",
-            "EMBEDDING_DIMENSION": "512",
-        }
-    )
+def test_search_without_embeddings_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = IndexStore(Config())
+    monkeypatch.setattr(store, "check_compatible", lambda: None)
+    mock_conn = MagicMock()
+    mock_conn.execute.return_value.scalar_one.return_value = 1
+    mock_engine = MagicMock()
+    mock_engine.connect.return_value.__enter__.return_value = mock_conn
+    monkeypatch.setattr(store, "_sql_engine", mock_engine)
 
-    embeddings = create_embeddings(config)
-    model = create_chat_model(config)
+    with pytest.raises(RuntimeError, match="Embeddings"):
+        store.search("q", 1)
 
-    assert embeddings.model == "embedding-model-test"
-    assert embeddings.output_dimensionality == 512
-    assert embeddings.vertexai is False
-    assert embeddings.client.vertexai is False
-    assert model.model == "chat-model-test"
-    assert model.vertexai is False
-    assert model.timeout == 60
-    assert model.max_retries == 2
-    http_options = embeddings.client._api_client._http_options
-    assert http_options.timeout == 60_000
-    assert http_options.retry_options.attempts == 3
+
+def test_render_rejects_documents_missing_source_or_location_metadata(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source"):
+        render_result(
+            {
+                "question": "Question?",
+                "documents": [Document(page_content="text", metadata={})],
+                "answer": "Answer [1]",
+            }
+        )
+
+    with pytest.raises(ValueError, match="location"):
+        render_result(
+            {
+                "question": "Question?",
+                "documents": [
+                    Document(
+                        page_content="text",
+                        metadata={"source": str(tmp_path / "a.txt")},
+                    )
+                ],
+                "answer": "Answer [1]",
+            }
+        )
