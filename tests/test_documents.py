@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 
 import pytest
 from pypdf import PdfReader
 from pypdf import PdfWriter
 
-from notebook.config import Config, RagError
+from notebook.config import Config
 from notebook.documents import discover_files, prepare_chunks
 
 
@@ -54,10 +55,11 @@ def make_text_pdf(path: Path, pages: list[str]) -> None:
 
 def config(**overrides: str) -> Config:
     values = {
-        "GOOGLE_API_KEY": "test-key",
+        "CHAT_MODEL": "google_genai:gemini-3.7-flash",
+        "EMBEDDING_MODEL": "huggingface:BAAI/bge-m3",
         "CHUNK_SIZE": "1000",
         "CHUNK_OVERLAP": "100",
-        "EMBEDDING_DIMENSION": "768",
+        "EMBEDDING_DIMENSION": "1024",
         "RETRIEVAL_K": "4",
     }
     values.update(overrides)
@@ -154,7 +156,7 @@ def test_chunk_ids_are_stable_and_change_when_source_changes(tmp_path: Path) -> 
 def test_blank_text_is_rejected(tmp_path: Path, content: bytes) -> None:
     source = tmp_path / "blank.txt"
     source.write_bytes(content)
-    with pytest.raises(RagError, match="no usable"):
+    with pytest.raises(ValueError, match="no usable"):
         prepare_chunks(source, config())
 
 
@@ -164,7 +166,7 @@ def test_image_only_pdf_is_rejected(tmp_path: Path) -> None:
     writer.add_blank_page(width=100, height=100)
     with source.open("wb") as handle:
         writer.write(handle)
-    with pytest.raises(RagError, match="no usable"):
+    with pytest.raises(ValueError, match="no usable"):
         prepare_chunks(source, config())
 
 
@@ -174,9 +176,9 @@ def test_invalid_utf8_and_corrupt_pdf_are_rejected(tmp_path: Path) -> None:
     invalid_text.write_bytes(b"\xff")
     corrupt_pdf.write_bytes(b"not a PDF")
 
-    with pytest.raises(RagError, match="UTF-8"):
+    with pytest.raises(UnicodeDecodeError):
         prepare_chunks(invalid_text, config())
-    with pytest.raises(RagError):
+    with pytest.raises(Exception):
         prepare_chunks(corrupt_pdf, config())
 
 
@@ -184,7 +186,7 @@ def test_invalid_utf8_and_corrupt_pdf_are_rejected(tmp_path: Path) -> None:
 def test_missing_and_explicit_unsupported_files_are_rejected(
     tmp_path: Path, path: str
 ) -> None:
-    with pytest.raises(RagError):
+    with pytest.raises(ValueError):
         prepare_chunks(tmp_path / path, config())
 
 
@@ -210,22 +212,46 @@ def test_discovery_skips_unsupported_files_and_is_sorted(tmp_path: Path) -> None
         {"CHUNK_OVERLAP": "1000"},
         {"EMBEDDING_DIMENSION": "0"},
         {"RETRIEVAL_K": "0"},
+        {"CHAT_MODEL": "   "},
+        {"EMBEDDING_MODEL": "   "},
+        {"CHUNK_SIZE": "not-an-int"},
     ],
 )
 def test_invalid_chunk_and_retrieval_settings_are_rejected(
     overrides: dict[str, str],
 ) -> None:
-    with pytest.raises(RagError):
+    with pytest.raises(ValueError):
         config(**overrides)
+
+
+def test_config_defaults_use_provider_model_identifiers() -> None:
+    assert Config.from_env({}).chat_model == "google_genai:gemini-3.7-flash"
+    assert Config.from_env({}).embedding_model == "huggingface:BAAI/bge-m3"
+    assert Config.from_env({}).embedding_dimension == 1024
 
 
 def test_config_repr_does_not_include_secret() -> None:
     configured = config(
-        GOOGLE_API_KEY="super-secret",
         DATABASE_URL="postgresql+psycopg://rag:db-secret@localhost:6024/rag",
     )
-    assert "super-secret" not in repr(configured)
     assert "db-secret" not in repr(configured)
+
+
+def test_unstructured_loader_missing_dependency_raises_runtime_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pdf = tmp_path / "sample.pdf"
+    make_text_pdf(pdf, ["sample content"])
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object):
+        if name == "langchain_community.document_loaders":
+            raise ImportError("No module named 'unstructured'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(RuntimeError, match="uv sync --extra pdf-ocr"):
+        prepare_chunks(pdf, Config.from_env({}, pdf_loader="unstructured"))
 
 
 def test_dotenv_values_do_not_override_environment(

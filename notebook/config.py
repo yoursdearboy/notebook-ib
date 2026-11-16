@@ -15,10 +15,8 @@ class RagError(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    google_api_key: str = field(default="", repr=False)
-    google_chat_model: str = "gemini-3.7-flash"
-    embedding_provider: str = "huggingface"
-    embedding_model: str = "BAAI/bge-m3"
+    chat_model: str = "google_genai:gemini-3.7-flash"
+    embedding_model: str = "huggingface:BAAI/bge-m3"
     embedding_dimension: int = 1024
     database_url: str = field(
         default="postgresql+psycopg://rag:rag@localhost:6024/rag", repr=False
@@ -42,42 +40,22 @@ class Config:
             values: Mapping[str, str] = os.environ
         else:
             values = environ
+
+        chat_model = values.get("CHAT_MODEL", "google_genai:gemini-3.7-flash").strip()
+        if not chat_model:
+            raise ValueError("CHAT_MODEL must not be blank.")
+
+        embedding_model = values.get(
+            "EMBEDDING_MODEL", "huggingface:BAAI/bge-m3"
+        ).strip()
+        if not embedding_model:
+            raise ValueError("EMBEDDING_MODEL must not be blank.")
+
         try:
-            # Keep existing .env files that set GOOGLE_EMBEDDING_MODEL working,
-            # while new configurations default to local Hugging Face embeddings.
-            embedding_provider = (
-                (
-                    values.get("EMBEDDING_PROVIDER")
-                    or (
-                        "google"
-                        if "GOOGLE_EMBEDDING_MODEL" in values
-                        else "huggingface"
-                    )
-                )
-                .strip()
-                .lower()
-            )
-            default_embedding_model = (
-                "gemini-embedding-2-preview"
-                if embedding_provider == "google"
-                else "BAAI/bge-m3"
-            )
-            embedding_model = values.get("EMBEDDING_MODEL") or (
-                values.get("GOOGLE_EMBEDDING_MODEL", default_embedding_model)
-                if embedding_provider == "google"
-                else default_embedding_model
-            )
             configured = cls(
-                google_api_key=values.get("GOOGLE_API_KEY", ""),
-                google_chat_model=values.get("GOOGLE_CHAT_MODEL", "gemini-3.7-flash"),
-                embedding_provider=embedding_provider,
+                chat_model=chat_model,
                 embedding_model=embedding_model,
-                embedding_dimension=int(
-                    values.get(
-                        "EMBEDDING_DIMENSION",
-                        "768" if embedding_provider == "google" else "1024",
-                    )
-                ),
+                embedding_dimension=int(values.get("EMBEDDING_DIMENSION", "1024")),
                 database_url=values.get(
                     "DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:6024/rag"
                 ),
@@ -92,38 +70,24 @@ class Config:
                 ),
             )
         except (TypeError, ValueError) as exc:
-            raise RagError(
+            raise ValueError(
                 "Configuration values for dimensions and chunk settings must be integers."
             ) from exc
+
         if configured.embedding_dimension <= 0:
-            raise RagError("EMBEDDING_DIMENSION must be positive.")
-        if configured.embedding_provider not in {"google", "huggingface"}:
-            raise RagError(
-                "EMBEDDING_PROVIDER must be either 'google' or 'huggingface'."
-            )
-        if not configured.embedding_model.strip():
-            raise RagError("EMBEDDING_MODEL must not be blank.")
+            raise ValueError("EMBEDDING_DIMENSION must be positive.")
         if configured.chunk_size <= 0:
-            raise RagError("CHUNK_SIZE must be positive.")
+            raise ValueError("CHUNK_SIZE must be positive.")
         if not 0 <= configured.chunk_overlap < configured.chunk_size:
-            raise RagError(
+            raise ValueError(
                 "CHUNK_OVERLAP must be at least zero and smaller than CHUNK_SIZE."
             )
         if configured.retrieval_k <= 0:
-            raise RagError("RETRIEVAL_K must be positive.")
+            raise ValueError("RETRIEVAL_K must be positive.")
         if configured.pdf_loader not in {"pypdf", "unstructured"}:
-            raise RagError("--pdf-loader must be either 'pypdf' or 'unstructured'.")
+            raise ValueError("--pdf-loader must be either 'pypdf' or 'unstructured'.")
         if not configured.pdf_ocr_languages:
-            raise RagError(
+            raise ValueError(
                 "--pdf-ocr-languages must contain at least one language code."
             )
         return configured
-
-    @property
-    def google_embedding_model(self) -> str:
-        """Compatibility alias for callers using the former Google-only setting."""
-        return self.embedding_model
-
-    @property
-    def embedding_model_id(self) -> str:
-        return f"{self.embedding_provider}:{self.embedding_model}"
