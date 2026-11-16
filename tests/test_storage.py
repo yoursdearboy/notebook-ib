@@ -9,7 +9,9 @@ from langchain_core.embeddings import Embeddings
 from sqlalchemy import create_engine, text
 
 from test_documents import make_text_pdf
-from main import Config, IndexStore, RagError, prepare_chunks
+from notebook.config import Config, RagError
+from notebook.documents import prepare_chunks
+from notebook.rag import IndexStore
 
 
 TEST_DATABASE_URL = os.environ.get("RAG_TEST_DATABASE_URL")

@@ -7,8 +7,8 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
-import main as app
-from main import Config, RagError
+import notebook.cli as app
+from notebook.config import Config, RagError
 
 
 class FakeEmbeddings:

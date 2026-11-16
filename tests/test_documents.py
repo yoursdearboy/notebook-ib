@@ -6,7 +6,8 @@ import pytest
 from pypdf import PdfReader
 from pypdf import PdfWriter
 
-from main import Config, RagError, discover_files, prepare_chunks
+from notebook.config import Config, RagError
+from notebook.documents import discover_files, prepare_chunks
 
 
 def make_text_pdf(path: Path, pages: list[str]) -> None:

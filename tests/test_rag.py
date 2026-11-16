@@ -7,12 +7,11 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
-from main import (
-    Config,
-    RagError,
+from notebook.chat import create_chat_model
+from notebook.config import Config, RagError
+from notebook.embeddings import create_embeddings
+from notebook.rag import (
     build_graph,
-    create_chat_model,
-    create_embeddings,
     render_result,
 )
 
