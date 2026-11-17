@@ -4,11 +4,10 @@ import builtins
 from pathlib import Path
 
 import pytest
-from pypdf import PdfReader
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 
 from notebook.config import Config
-from notebook.documents import discover_files, prepare_chunks
+from notebook.documents import discover_paths, index_path, prepare_chunks
 
 
 def make_text_pdf(path: Path, pages: list[str]) -> None:
@@ -198,7 +197,8 @@ def test_discovery_skips_unsupported_files_and_is_sorted(tmp_path: Path) -> None
     nested.mkdir()
     (nested / "m.pdf").write_bytes(b"%PDF-placeholder")
 
-    assert discover_files(tmp_path) == [
+    assert callable(index_path)
+    assert discover_paths(tmp_path) == [
         (tmp_path / "a.md").resolve(),
         (nested / "m.pdf").resolve(),
         (tmp_path / "z.txt").resolve(),
