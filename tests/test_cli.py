@@ -11,6 +11,11 @@ import notebook.cli as app
 from notebook.config import Config
 
 
+@pytest.fixture(autouse=True)
+def format_caplog(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.handler.setFormatter(app._SafeColorFormatter())
+
+
 class FakeEmbeddings:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
@@ -86,7 +91,7 @@ def test_missing_subcommand_shows_usage_and_returns_argument_error(
 
 
 def test_blank_question_fails_before_service_factories(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     set_config_env(monkeypatch)
     monkeypatch.setattr(
@@ -104,11 +109,11 @@ def test_blank_question_fails_before_service_factories(
     result = app.main(["ask", "   "])
 
     assert result == 2
-    assert "question must not be blank" in capsys.readouterr().err.lower()
+    assert "question must not be blank" in caplog.text.lower()
 
 
 def test_invalid_config_fails_before_service_factories(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     set_config_env(monkeypatch, CHAT_MODEL="   ")
     monkeypatch.setattr(
@@ -126,11 +131,14 @@ def test_invalid_config_fails_before_service_factories(
     result = app.main(["ask", "What is in the index?"])
 
     assert result == 1
-    assert "chat_model must not be blank" in capsys.readouterr().err.lower()
+    assert "chat_model must not be blank" in caplog.text.lower()
 
 
 def test_directory_index_continues_after_corrupt_pdf_and_returns_failure(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
 ) -> None:
     set_config_env(monkeypatch)
     (tmp_path / "good.txt").write_text("A known fact.\n", encoding="utf-8")
@@ -147,7 +155,7 @@ def test_directory_index_continues_after_corrupt_pdf_and_returns_failure(
     assert len(store.replacements) == 1
     assert "1 file" in captured.out.lower()
     assert "1 chunk" in captured.out.lower()
-    assert "bad.pdf" in captured.err
+    assert "bad.pdf" in caplog.text
 
 
 def test_fresh_index_recreates_index_before_indexing(
@@ -168,7 +176,7 @@ def test_fresh_index_recreates_index_before_indexing(
 
 
 def test_fresh_index_does_not_delete_existing_index_for_empty_input(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     set_config_env(monkeypatch)
     store = FakeStore()
@@ -179,11 +187,11 @@ def test_fresh_index_does_not_delete_existing_index_for_empty_input(
 
     assert result == 1
     assert not store.initialized
-    assert "no supported documents" in capsys.readouterr().err.lower()
+    assert "no supported documents" in caplog.text.lower()
 
 
 def test_embedding_failure_does_not_replace_existing_source(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     set_config_env(monkeypatch)
     source = tmp_path / "keep.txt"
@@ -203,11 +211,11 @@ def test_embedding_failure_does_not_replace_existing_source(
     assert store.documents[0].page_content == "old version"
     assert store.replacements == []
     assert store.closed
-    assert "embedding" in capsys.readouterr().err.lower()
+    assert "embedding" in caplog.text.lower()
 
 
 def test_ask_incompatible_index_fails_before_model_initialization_and_closes_store(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     set_config_env(monkeypatch)
     store = FakeStore()
@@ -229,10 +237,9 @@ def test_ask_incompatible_index_fails_before_model_initialization_and_closes_sto
     )
 
     result = app.main(["ask", "Question?"])
-    captured = capsys.readouterr()
 
     assert result == 1
-    assert "not initialized" in captured.err.lower()
+    assert "not initialized" in caplog.text.lower()
     assert store.closed
 
 
@@ -292,7 +299,7 @@ def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
 
 
 def test_cli_errors_redact_database_passwords(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     secret_url = "postgresql+psycopg://rag:fake-password@localhost:6024/rag"
     set_config_env(monkeypatch, DATABASE_URL=secret_url)
@@ -306,9 +313,22 @@ def test_cli_errors_redact_database_passwords(
     monkeypatch.setattr(app, "init_chat_model", raise_model_error)
 
     result = app.main(["ask", "Question?"])
-    diagnostic = capsys.readouterr().err
+    diagnostic = caplog.text
 
     assert result == 1
     assert "fake-password" not in diagnostic
     assert "[redacted]" in diagnostic
     assert store.closed
+
+
+def test_cli_logger_formats_errors_with_ansi_colors(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    set_config_env(monkeypatch, CHAT_MODEL="   ")
+
+    result = app.main(["ask", "Question?"])
+    diagnostic = caplog.handler.stream.getvalue()
+
+    assert result == 1
+    assert diagnostic.startswith("\033[31mERROR: ")
+    assert diagnostic.rstrip("\n").endswith("\033[0m")

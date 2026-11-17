@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import re
-import sys
 from pathlib import Path
+from typing import ClassVar
 
 from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from langchain_core.embeddings import Embeddings
-from sqlalchemy.engine import make_url
 
 from notebook.config import Config
 from notebook.documents import discover_files, prepare_chunks
@@ -17,26 +17,40 @@ from notebook.rag import IndexStore, build_graph, render_result
 __all__ = ["index_path", "main"]
 
 
-def _safe_message(message: str, config: Config) -> str:
-    safe = message
-    try:
-        configured_url = make_url(config.database_url)
-        if configured_url.password:
-            hidden_url = configured_url.set(password="[redacted]").render_as_string(
-                hide_password=False
-            )
-            safe = safe.replace(config.database_url, hidden_url)
-    except Exception:
-        pass
-    return re.sub(
-        r"(?i)(postgres(?:ql)?(?:\+[^:/\s]+)?://[^:/@\s]+:)[^@/\s]+(@)",
-        r"\1[redacted]\2",
-        safe,
-    )
+class _SafeColorFormatter(logging.Formatter):
+    """Formatter that redacts database credentials and adds ANSI colors."""
+
+    COLORS: ClassVar[dict[int, str]] = {
+        logging.DEBUG: "\033[36m",
+        logging.INFO: "\033[32m",
+        logging.WARNING: "\033[33m",
+        logging.ERROR: "\033[31m",
+        logging.CRITICAL: "\033[1;31m",
+    }
+    RESET = "\033[0m"
+
+    def __init__(self, fmt: str = "%(levelname)s: %(message)s") -> None:
+        super().__init__(fmt)
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        safe = re.sub(
+            r"(?i)(postgres(?:ql)?(?:\+[^:/\s]+)?://[^:/@\s]+:)[^@/\s]+(@)",
+            r"\1[redacted]\2",
+            message,
+        )
+        color = self.COLORS.get(record.levelno)
+        if color:
+            return f"{color}{safe}{self.RESET}"
+        return safe
 
 
-def _report_error(message: str, config: Config, category: str = "Error") -> None:
-    print(f"{category}: {_safe_message(message, config)}", file=sys.stderr)
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_SafeColorFormatter())
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
 
 
 def index_path(
@@ -49,10 +63,10 @@ def index_path(
     try:
         files = discover_files(path)
     except Exception as exc:
-        _report_error(str(exc), config)
+        logger.error("%s", exc)
         return 1
     if not files:
-        _report_error(f"No supported documents found in {path}.", config)
+        logger.error("No supported documents found in %s.", path)
         return 1
     store.initialize(fresh=fresh)
     succeeded = 0
@@ -67,7 +81,7 @@ def index_path(
             store.replace_source(chunks, vectors)
         except Exception as exc:
             failed += 1
-            _report_error(f"Failed {source}: {exc}", config, "File error")
+            logger.error("Failed %s: %s", source, exc)
             continue
         succeeded += 1
         total_chunks += len(chunks)
@@ -123,11 +137,11 @@ def main(argv: list[str] | None = None) -> int:
             pdf_ocr_languages=getattr(args, "pdf_ocr_languages", "eng"),
         )
     except ValueError as exc:
-        _report_error(str(exc), Config())
+        logger.error("%s", exc)
         return 1
 
     if args.command == "ask" and not args.question.strip():
-        _report_error("Question must not be blank.", config)
+        logger.error("Question must not be blank.")
         return 2
 
     store: IndexStore | None = None
@@ -150,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render_result(state))
         return 0
     except Exception as exc:
-        _report_error(str(exc), config)
+        logger.error("%s", exc)
         return 1
     finally:
         if store is not None:
