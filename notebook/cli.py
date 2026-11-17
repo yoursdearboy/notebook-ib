@@ -58,7 +58,6 @@ def index_path(
     config: Config,
     store: IndexStore,
     embeddings: Embeddings,
-    fresh: bool = False,
 ) -> int:
     try:
         files = discover_files(path)
@@ -68,7 +67,7 @@ def index_path(
     if not files:
         logger.error("No supported documents found in %s.", path)
         return 1
-    store.initialize(fresh=fresh)
+    store.check_compatible()
     succeeded = 0
     failed = 0
     total_chunks = 0
@@ -102,11 +101,6 @@ def _create_parser() -> argparse.ArgumentParser:
     )
     index_parser.add_argument(
         "path", type=Path, help="Text, Markdown, PDF, or directory of supported files"
-    )
-    index_parser.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Delete the existing index before indexing (destructive)",
     )
     index_parser.add_argument(
         "--pdf-loader",
@@ -149,9 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "index":
             embeddings = init_embeddings(config.embedding_model)
             store = IndexStore(config, embeddings)
-            failures = index_path(
-                args.path, config, store, embeddings, fresh=args.fresh
-            )
+            failures = index_path(args.path, config, store, embeddings)
             return 1 if failures else 0
 
         store = IndexStore(config)

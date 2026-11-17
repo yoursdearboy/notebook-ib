@@ -40,56 +40,13 @@ class IndexStore:
         self._vector_store: PGVectorStore | None = None
         self._closed = False
 
-    def initialize(self, fresh: bool = False) -> None:
-        with self._sql_engine.begin() as connection:
-            connection.execute(
-                sql_text("SELECT pg_advisory_xact_lock(:lock_key)"),
-                {"lock_key": 747291012},
-            )
-            if fresh:
-                connection.execute(
-                    sql_text("DROP TABLE IF EXISTS rag_chunks, rag_index_config")
-                )
-            connection.execute(sql_text("CREATE EXTENSION IF NOT EXISTS vector"))
-            connection.execute(
-                sql_text(
-                    f"CREATE TABLE IF NOT EXISTS rag_chunks ("
-                    f"langchain_id UUID PRIMARY KEY, content TEXT NOT NULL, "
-                    f"embedding VECTOR({self.config.embedding_dimension}) NOT NULL, "
-                    "langchain_metadata JSONB NOT NULL)"
-                )
-            )
-            connection.execute(
-                sql_text(
-                    "CREATE TABLE IF NOT EXISTS rag_index_config ("
-                    "singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), "
-                    "embedding_model TEXT NOT NULL, embedding_dimension INTEGER NOT NULL)"
-                )
-            )
-            connection.execute(
-                sql_text(
-                    "INSERT INTO rag_index_config (singleton, embedding_model, embedding_dimension) "
-                    "VALUES (TRUE, :model, :dimension) ON CONFLICT (singleton) DO NOTHING"
-                ),
-                {
-                    "model": self.config.embedding_model,
-                    "dimension": self.config.embedding_dimension,
-                },
-            )
-            row = connection.execute(
-                sql_text(
-                    "SELECT embedding_model, embedding_dimension FROM rag_index_config WHERE singleton = TRUE"
-                )
-            ).one()
-            self._assert_config(row.embedding_model, row.embedding_dimension)
-
     def _assert_config(self, embedding_model: str, embedding_dimension: int) -> None:
         if (
             embedding_model != self.config.embedding_model
             or embedding_dimension != self.config.embedding_dimension
         ):
             raise RuntimeError(
-                "The existing index uses an incompatible embedding model or dimension; create a fresh index."
+                "The existing index uses an incompatible embedding model or dimension; initialize a fresh index."
             )
 
     def check_compatible(self) -> None:

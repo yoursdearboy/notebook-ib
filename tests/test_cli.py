@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
 import notebook.cli as app
+from notebook import migration
 from notebook.config import Config
 
 
@@ -44,14 +45,8 @@ class FakeStore:
             self.events = events if events is not None else []
         self.embeddings = embeddings
         self.closed = False
-        self.initialized = False
-        self.fresh = False
         self.replacements: list[tuple[list[Document], list[list[float]]]] = []
         self.documents: list[Document] = []
-
-    def initialize(self, fresh: bool = False) -> None:
-        self.initialized = True
-        self.fresh = fresh
 
     def check_compatible(self) -> None:
         self.events.append("check-compatible")
@@ -104,7 +99,9 @@ def test_blank_question_fails_before_service_factories(
         "init_chat_model",
         lambda *args, **kwargs: pytest.fail("chat factory called"),
     )
-    monkeypatch.setattr(app, "IndexStore", lambda *args, **kwargs: pytest.fail("store created"))
+    monkeypatch.setattr(
+        app, "IndexStore", lambda *args, **kwargs: pytest.fail("store created")
+    )
 
     result = app.main(["ask", "   "])
 
@@ -126,7 +123,9 @@ def test_invalid_config_fails_before_service_factories(
         "init_chat_model",
         lambda *args, **kwargs: pytest.fail("chat factory called"),
     )
-    monkeypatch.setattr(app, "IndexStore", lambda *args, **kwargs: pytest.fail("store created"))
+    monkeypatch.setattr(
+        app, "IndexStore", lambda *args, **kwargs: pytest.fail("store created")
+    )
 
     result = app.main(["ask", "What is in the index?"])
 
@@ -158,36 +157,75 @@ def test_directory_index_continues_after_corrupt_pdf_and_returns_failure(
     assert "bad.pdf" in caplog.text
 
 
-def test_fresh_index_recreates_index_before_indexing(
+def test_index_requires_initialization_and_rejects_fresh_option(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     set_config_env(monkeypatch)
     (tmp_path / "source.txt").write_text("A known fact.\n", encoding="utf-8")
-    store = FakeStore()
     monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
-    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+    monkeypatch.setattr(
+        app, "IndexStore", lambda *args, **kwargs: pytest.fail("store created")
+    )
 
     result = app.main(["index", "--fresh", str(tmp_path)])
 
+    assert result == 2
+
+
+def test_index_checks_compatibility_before_writing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch)
+    (tmp_path / "source.txt").write_text("A known fact.\n", encoding="utf-8")
+    events: list[str] = []
+    store = FakeStore(events=events)
+    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+
+    result = app.main(["index", str(tmp_path)])
+
     assert result == 0
-    assert store.initialized
-    assert store.fresh
+    assert events[0] == "check-compatible"
     assert len(store.replacements) == 1
 
 
-def test_fresh_index_does_not_delete_existing_index_for_empty_input(
+def test_index_stops_when_schema_is_not_initialized(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     set_config_env(monkeypatch)
+    source = tmp_path / "source.txt"
+    source.write_text("A known fact.\n", encoding="utf-8")
     store = FakeStore()
+
+    def fail_compatibility_check() -> None:
+        raise RuntimeError(
+            "The index is not initialized; run the migration script first."
+        )
+
+    store.check_compatible = fail_compatibility_check  # type: ignore[method-assign]
     monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
 
-    result = app.main(["index", "--fresh", str(tmp_path)])
+    result = app.main(["index", str(source)])
 
     assert result == 1
-    assert not store.initialized
-    assert "no supported documents" in caplog.text.lower()
+    assert store.replacements == []
+    assert "not initialized" in caplog.text.lower()
+
+
+def test_migration_cli_passes_fresh_to_initializer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_config_env(monkeypatch)
+    calls: list[bool] = []
+    monkeypatch.setattr(
+        migration, "initialize_rag", lambda config, fresh=False: calls.append(fresh)
+    )
+
+    result = migration.main(["--fresh"])
+
+    assert result == 0
+    assert calls == [True]
 
 
 def test_embedding_failure_does_not_replace_existing_source(
