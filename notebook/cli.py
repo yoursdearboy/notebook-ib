@@ -64,11 +64,6 @@ def _create_parser() -> argparse.ArgumentParser:
         "path", type=Path, help="Text, Markdown, PDF, or directory of supported files"
     )
     index_parser.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Delete the existing index before indexing (destructive)",
-    )
-    index_parser.add_argument(
         "--pdf-loader",
         choices=("pypdf", "unstructured"),
         default="pypdf",
@@ -109,9 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "index":
             embeddings = init_embeddings(config.embedding_model)
             store = IndexStore(config, embeddings)
-            failures = index_path(
-                args.path, config, store, embeddings, fresh=args.fresh
-            )
+            failures = index_path(args.path, config, store, embeddings)
             return 1 if failures else 0
 
         store = IndexStore(config)

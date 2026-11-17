@@ -11,6 +11,7 @@ from test_documents import make_text_pdf
 
 from notebook.config import Config
 from notebook.documents import prepare_chunks
+from notebook.migration import initialize_rag
 from notebook.rag import IndexStore
 
 TEST_DATABASE_URL = os.environ.get("RAG_TEST_DATABASE_URL")
@@ -86,7 +87,7 @@ def document(source: str, content: str, index: int = 0) -> Document:
 def test_documents_persist_across_reopen_and_search_preserves_metadata() -> None:
     embeddings = FakeEmbeddings()
     first = IndexStore(make_config(), embeddings)
-    first.initialize()
+    initialize_rag(make_config())
     first.replace_source(
         [document("/docs/alpha.txt", "blue comet", 0)],
         [embeddings._vector("blue comet")],
@@ -112,7 +113,7 @@ def test_multipage_pdf_chunks_persist_with_unique_ids(tmp_path) -> None:
     embeddings = FakeEmbeddings()
     store = IndexStore(make_config(), embeddings)
     try:
-        store.initialize()
+        initialize_rag(make_config())
         vectors = [embeddings._vector(chunk.page_content) for chunk in chunks]
         store.replace_source(chunks, vectors)
         with store._sql_engine.connect() as connection:
@@ -129,7 +130,7 @@ def test_replacing_a_source_removes_chunks_left_from_its_longer_version() -> Non
     embeddings = FakeEmbeddings()
     store = IndexStore(make_config(), embeddings)
     try:
-        store.initialize()
+        initialize_rag(make_config())
         old_documents = [
             document("/docs/shorten.txt", f"old chunk {index}", index)
             for index in range(5)
@@ -154,7 +155,7 @@ def test_failed_database_insert_rolls_back_source_replacement() -> None:
     store = IndexStore(make_config(), embeddings)
     engine = create_engine(TEST_DATABASE_URL)
     try:
-        store.initialize()
+        initialize_rag(make_config())
         previous = document("/docs/atomic.txt", "previous version")
         store.replace_source([previous], [embeddings._vector(previous.page_content)])
         with engine.begin() as connection:
@@ -189,7 +190,7 @@ def test_replacing_a_source_keeps_other_sources() -> None:
     embeddings = FakeEmbeddings()
     store = IndexStore(make_config(), embeddings)
     try:
-        store.initialize()
+        initialize_rag(make_config())
         alpha = document("/docs/alpha.txt", "alpha text")
         beta = document("/docs/beta.txt", "beta text", 1)
         store.replace_source([alpha], [embeddings._vector(alpha.page_content)])
@@ -217,7 +218,7 @@ def test_model_or_dimension_mismatch_fails_before_embedding(
 ) -> None:
     embeddings = FakeEmbeddings()
     store = IndexStore(make_config(), embeddings)
-    store.initialize()
+    initialize_rag(make_config())
     store.close()
     mismatched = IndexStore(make_config(**overrides), embeddings)
     with pytest.raises(RuntimeError, match="incompatible"):
@@ -230,10 +231,27 @@ def test_model_or_dimension_mismatch_fails_before_embedding(
 def test_initialization_is_idempotent_and_empty_index_has_actionable_error() -> None:
     store = IndexStore(make_config(), FakeEmbeddings())
     try:
-        store.initialize()
-        store.initialize()
+        initialize_rag(make_config())
+        initialize_rag(make_config())
         with pytest.raises(RuntimeError, match="no documents"):
             store.search("nothing here", 2)
+    finally:
+        store.close()
+
+
+def test_fresh_initialization_drops_existing_chunks() -> None:
+    embeddings = FakeEmbeddings()
+    config = make_config()
+    store = IndexStore(config, embeddings)
+    try:
+        initialize_rag(config)
+        chunk = document("/docs/fresh.txt", "old indexed content")
+        store.replace_source([chunk], [embeddings._vector(chunk.page_content)])
+
+        initialize_rag(config, fresh=True)
+
+        with pytest.raises(RuntimeError, match="no documents"):
+            store.search("old indexed content", 1)
     finally:
         store.close()
 
@@ -251,7 +269,7 @@ def test_invalid_vector_count_and_dimension_are_rejected_before_mutation() -> No
     embeddings = FakeEmbeddings()
     store = IndexStore(make_config(), embeddings)
     try:
-        store.initialize()
+        initialize_rag(make_config())
         existing = document("/docs/validation.txt", "keep me")
         store.replace_source([existing], [embeddings._vector(existing.page_content)])
         with pytest.raises(ValueError, match="dimension"):

@@ -44,7 +44,6 @@ def index_path(
     config: Config,
     store: IndexStore,
     embeddings: Embeddings,
-    fresh: bool = False,
 ) -> int:
     try:
         files = discover_paths(path)
@@ -54,7 +53,7 @@ def index_path(
     if not files:
         logger.error("No supported documents found in %s.", path)
         return 1
-    store.initialize(fresh=fresh)
+    store.check_compatible()
     succeeded = 0
     failed = 0
     total_chunks = 0

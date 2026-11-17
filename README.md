@@ -11,9 +11,10 @@ cp .env.example .env
 # Set provider credentials in .env (e.g. GOOGLE_API_KEY for Google models)
 docker compose up -d --wait
 uv sync
+uv run python -m notebook.migration
 ```
 
-The default database is `rag` on `localhost:6024`. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts. Model selection is configured in `.env` using LangChain `provider:model` identifiers:
+The initialization command creates the RAG schema in the default database, `rag` on `localhost:6024`. Run it after starting PostgreSQL and before indexing or asking questions. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts. Model selection is configured in `.env` using LangChain `provider:model` identifiers:
 
 ```dotenv
 CHAT_MODEL=google_genai:gemini-3.7-flash
@@ -35,10 +36,11 @@ uv run python -m notebook ask "What color was the comet?"
 If the embedding model or dimension changes, rebuild the index from scratch:
 
 ```sh
-uv run python -m notebook index ./documents --fresh
+uv run python -m notebook.migration --fresh
+uv run python -m notebook index ./documents
 ```
 
-`--fresh` deletes the existing indexed chunks and configuration before indexing the supplied documents. It is destructive; ensure the path contains the documents you want to keep.
+`--fresh` deletes the existing indexed chunks and configuration before initializing the schema. It is destructive; reindex the documents you want to keep afterward.
 
 Example answer:
 
