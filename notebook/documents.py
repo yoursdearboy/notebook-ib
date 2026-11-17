@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from notebook.config import Config
+from notebook.rag import IndexStore
 
-__all__ = ["discover_files", "prepare_chunks"]
+__all__ = ["discover_paths", "index_path", "prepare_chunks"]
+
+logger = logging.getLogger(__name__)
 
 
-def discover_files(path: Path) -> list[Path]:
+def discover_paths(path: Path) -> list[Path]:
     path = Path(path)
     if not path.exists():
         raise ValueError(f"Path does not exist: {path}")
@@ -32,6 +37,45 @@ def discover_files(path: Path) -> list[Path]:
         ),
         key=lambda item: str(item),
     )
+
+
+def index_path(
+    path: Path,
+    config: Config,
+    store: IndexStore,
+    embeddings: Embeddings,
+    fresh: bool = False,
+) -> int:
+    try:
+        files = discover_paths(path)
+    except Exception as exc:
+        logger.error("%s", exc)
+        return 1
+    if not files:
+        logger.error("No supported documents found in %s.", path)
+        return 1
+    store.initialize(fresh=fresh)
+    succeeded = 0
+    failed = 0
+    total_chunks = 0
+    for source in files:
+        try:
+            chunks = prepare_chunks(source, config)
+            vectors = embeddings.embed_documents(
+                [chunk.page_content for chunk in chunks]
+            )
+            store.replace_source(chunks, vectors)
+        except Exception as exc:
+            failed += 1
+            logger.error("Failed %s: %s", source, exc)
+            continue
+        succeeded += 1
+        total_chunks += len(chunks)
+        print(f"Indexed {source}: {len(chunks)} chunks.")
+    print(
+        f"Indexing summary: {succeeded} files succeeded, {failed} failed, {total_chunks} chunks indexed."
+    )
+    return failed
 
 
 def _split_signature(config: Config, *, pdf: bool = False) -> str:
@@ -152,7 +196,7 @@ def _split_text(
 
 def prepare_chunks(path: Path, config: Config) -> list[Document]:
     path = Path(path)
-    files = discover_files(path)
+    files = discover_paths(path)
     if path.is_dir():
         raise ValueError("prepare_chunks expects one file path.")
     if not files:

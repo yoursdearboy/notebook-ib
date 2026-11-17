@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from notebook.cli import index_path, main
+from notebook.cli import main
 from notebook.config import Config
-from notebook.documents import discover_files, prepare_chunks
+from notebook.documents import discover_paths, index_path, prepare_chunks
 from notebook.rag import IndexStore, RagState, build_graph, render_result
 
 __all__ = [
@@ -10,7 +10,7 @@ __all__ = [
     "IndexStore",
     "RagState",
     "build_graph",
-    "discover_files",
+    "discover_paths",
     "index_path",
     "main",
     "prepare_chunks",

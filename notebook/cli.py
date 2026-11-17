@@ -8,13 +8,12 @@ from typing import ClassVar
 
 from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
-from langchain_core.embeddings import Embeddings
 
 from notebook.config import Config
-from notebook.documents import discover_files, prepare_chunks
+from notebook.documents import index_path
 from notebook.rag import IndexStore, build_graph, render_result
 
-__all__ = ["index_path", "main"]
+__all__ = ["main"]
 
 
 class _SafeColorFormatter(logging.Formatter):
@@ -51,45 +50,6 @@ if not logger.handlers:
     _handler.setFormatter(_SafeColorFormatter())
     logger.addHandler(_handler)
 logger.setLevel(logging.INFO)
-
-
-def index_path(
-    path: Path,
-    config: Config,
-    store: IndexStore,
-    embeddings: Embeddings,
-    fresh: bool = False,
-) -> int:
-    try:
-        files = discover_files(path)
-    except Exception as exc:
-        logger.error("%s", exc)
-        return 1
-    if not files:
-        logger.error("No supported documents found in %s.", path)
-        return 1
-    store.initialize(fresh=fresh)
-    succeeded = 0
-    failed = 0
-    total_chunks = 0
-    for source in files:
-        try:
-            chunks = prepare_chunks(source, config)
-            vectors = embeddings.embed_documents(
-                [chunk.page_content for chunk in chunks]
-            )
-            store.replace_source(chunks, vectors)
-        except Exception as exc:
-            failed += 1
-            logger.error("Failed %s: %s", source, exc)
-            continue
-        succeeded += 1
-        total_chunks += len(chunks)
-        print(f"Indexed {source}: {len(chunks)} chunks.")
-    print(
-        f"Indexing summary: {succeeded} files succeeded, {failed} failed, {total_chunks} chunks indexed."
-    )
-    return failed
 
 
 def _create_parser() -> argparse.ArgumentParser:
