@@ -65,6 +65,30 @@ uv run python -m notebook index ./documents --pdf-loader unstructured --pdf-ocr-
 
 Unstructured's automatic strategy extracts embedded PDF text when available and uses Tesseract OCR for scanned pages. Tesseract and Poppler must be installed on the system, along with the language data named by `--pdf-ocr-languages` (comma-separated codes such as `eng` or `eng,rus`). The loader setting is isolated to PDF ingestion, so another LangChain PDF loader can be added or selected without changing chunking and storage. Retrieval can return irrelevant passages, so the model is instructed to abstain when evidence is insufficient. Citation numbers are checked against retrieved chunks, and every retrieved chunk is shown in the reference list. These checks help trace an answer but cannot guarantee that each claim is supported by its citation.
 
+## Open WebUI
+
+The RAG graph is also exposed as an OpenAI-compatible API (`/v1/models`, `/v1/chat/completions`, model id `notebook-rag`), so Open WebUI can chat with the indexed documents. Both run from the uv virtualenv, not in containers. Start PostgreSQL first (`docker compose up -d --wait`), then in two terminals:
+
+```sh
+uv sync --group webui
+uv run uvicorn notebook.api:app --port 8000
+```
+
+```sh
+DATA_DIR="$PWD/.open-webui" DATABASE_URL="sqlite:///$PWD/.open-webui/webui.db" \
+VECTOR_DB=pgvector PGVECTOR_DB_URL=postgresql+psycopg://rag:rag@127.0.0.1:6024/rag \
+OPENAI_API_BASE_URL=http://localhost:8000/v1 OPENAI_API_KEY=not-needed \
+ENABLE_OLLAMA_API=false ENABLE_TITLE_GENERATION=false ENABLE_TAGS_GENERATION=false \
+ENABLE_FOLLOW_UP_GENERATION=false ENABLE_AUTOCOMPLETE_GENERATION=false \
+uv run open-webui serve --port 3000
+```
+
+Open WebUI stores its users, chats, and settings in `.open-webui/webui.db`. The explicit `DATABASE_URL` applies to the WebUI process and overrides the PostgreSQL URL from `.env`, which the RAG API uses.
+
+Open WebUI stores its embeddings in its own `document_chunk` table in the Compose PostgreSQL database. If you use a different PostgreSQL instance, set `PGVECTOR_DB_URL` to its connection URL. The `notebook-rag` model still queries the notebook's document index through the RAG API.
+
+Open http://localhost:3000 and select the `notebook-rag` model. Each message is answered independently from the last user message, with references appended. The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra auxiliary requests, each of which would run a RAG query. Open WebUI reads these as initial settings only on first start; afterwards change them in the admin settings.
+
 ## Tests
 
 Run the provider-independent checks with:

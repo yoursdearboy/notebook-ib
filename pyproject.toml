@@ -18,6 +18,8 @@ dependencies = [
     "sqlalchemy>=2.0",
     "langchain-huggingface[full]>=1.2.3",
     "langchain-openai>=1.8.1",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -31,3 +33,10 @@ dev = [
     "pytest>=8.4",
     "ruff>=0.17.5",
 ]
+webui = [
+    "open-webui>=0.8.8",
+    "audioop-lts>=0.2.2; python_version >= '3.13'",
+]
+
+[tool.uv]
+override-dependencies = ["pyarrow==22.0.0"]

@@ -11,5 +11,7 @@ wheels/
 
 # Local configuration and test artifacts
 .env
+/.open-webui/
 .pytest_cache/
 .coverage
+.webui_secret_key
