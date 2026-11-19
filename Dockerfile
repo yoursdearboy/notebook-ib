@@ -17,10 +17,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=.python-version,target=.python-version \
     uv sync --frozen --no-dev --group webui --no-install-project
-COPY pyproject.toml uv.lock README.md .python-version ./
-COPY notebook ./notebook
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --group webui --no-editable
 
 # PostgreSQL, Notebook, Open WebUI, and the public Nginx proxy.
 FROM pgvector/pgvector:pg16
@@ -32,8 +28,8 @@ RUN apt-get update \
     && chown -R app:app /home/app/.cache
 COPY --from=build /opt/python /opt/python
 COPY --from=build --chown=app:app /app/.venv /app/.venv
-COPY --from=build --chown=app:app /app/notebook /app/notebook
 COPY --chmod=755 entrypoint.sh /usr/local/bin/notebook-entrypoint.sh
+COPY --chown=app:app notebook /app/notebook
 COPY deploy/nginx.conf deploy/assets.js deploy/asset-viewer.html /etc/nginx/
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
