@@ -20,6 +20,7 @@ dependencies = [
     "langchain-openai>=1.8.1",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "torch>=2.14",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,15 @@ webui = [
 
 [tool.uv]
 override-dependencies = ["pyarrow==22.0.0"]
+
+# CPU-only PyTorch on Linux (Docker image); macOS wheels on PyPI are CPU-only already.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux' and python_version < '3.15'" }]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
