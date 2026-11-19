@@ -8,6 +8,14 @@ from notebook.api import _source_event, create_app
 from notebook.rag import build_references
 
 
+def test_models_list_uses_friendly_name_and_preserves_api_id() -> None:
+    response = TestClient(create_app()).get("/v1/models")
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["id"] == "notebook-rag"
+    assert response.json()["data"][0]["name"] == "notebook"
+
+
 def test_pdf_citation_embeds_the_full_document_at_the_cited_page(tmp_path, monkeypatch):
     monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
     monkeypatch.setenv("NOTEBOOK_ASSETS_BASE_URL", "https://chat.example.com")
