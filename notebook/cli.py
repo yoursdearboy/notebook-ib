@@ -11,9 +11,21 @@ from langchain.embeddings import init_embeddings
 
 from notebook.config import Config
 from notebook.documents import index_path
-from notebook.rag import IndexStore, build_graph, render_result
+from notebook.rag import IndexStore, RagState, build_graph, build_references
 
 __all__ = ["main"]
+
+
+def render_result(state: RagState) -> str:
+    answer = state.get("answer", "")
+    documents = state.get("documents", [])
+    if not documents:
+        return answer
+    lines = ["Retrieved references:"] + [
+        f"[{r['index']}] {r['path']} ({r['location']}) — {r['excerpt']}"
+        for r in build_references(documents)
+    ]
+    return answer + "\n\n" + "\n".join(lines)
 
 
 class _SafeColorFormatter(logging.Formatter):

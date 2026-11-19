@@ -27,7 +27,6 @@ __all__ = [
     "Reference",
     "build_graph",
     "build_references",
-    "render_result",
 ]
 
 
@@ -287,18 +286,3 @@ def build_references(documents: list[Document]) -> list[Reference]:
             )
         )
     return references
-
-
-def render_result(state: RagState, *, include_references: bool = True) -> str:
-    answer = state.get("answer", "")
-    documents = state.get("documents", [])
-    if not documents:
-        return answer
-    references = build_references(documents)
-    if not include_references:
-        return answer
-    lines = ["Retrieved references:"] + [
-        f"[{r['index']}] {r['path']} ({r['location']}) — {r['excerpt']}"
-        for r in references
-    ]
-    return answer + "\n\n" + "\n".join(lines)

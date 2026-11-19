@@ -18,7 +18,7 @@ from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
 from notebook.config import Config
-from notebook.rag import IndexStore, Reference, build_graph, build_references, render_result
+from notebook.rag import IndexStore, Reference, build_graph, build_references
 
 __all__ = ["app", "create_app"]
 
@@ -164,13 +164,10 @@ def create_app(config: Config | None = None) -> FastAPI:
         references: list[Reference] = []
         try:
             state = app.state.graph.invoke({"question": question})
-            if request.stream:
-                # Open WebUI shows references as citations; send them as events
-                # instead of appending them to the answer text.
-                references = build_references(state.get("documents", []))
-                answer = render_result(state, include_references=False)
-            else:
-                answer = render_result(state)
+            # Open WebUI shows references as citations, so they are sent as
+            # events rather than appended to the answer text.
+            answer = state["answer"]
+            references = build_references(state.get("documents", []))
         except Exception as exc:
             logger.exception("RAG request failed")
             # Surface errors (e.g. "index not initialized") in the chat itself.

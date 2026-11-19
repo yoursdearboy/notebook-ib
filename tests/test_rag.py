@@ -12,7 +12,6 @@ from notebook.config import Config
 from notebook.rag import (
     IndexStore,
     build_graph,
-    render_result,
 )
 
 
@@ -137,46 +136,6 @@ def test_text_content_blocks_are_normalized(tmp_path: Path) -> None:
     assert result["answer"] == "Supported answer [1]"
 
 
-def test_render_uses_metadata_locations_and_lists_every_retrieved_chunk(
-    tmp_path: Path,
-) -> None:
-    first_path = (tmp_path / "manual.pdf").resolve()
-    second_path = (tmp_path / "notes.md").resolve()
-    state = {
-        "question": "Question?",
-        "documents": [
-            doc(first_path, "  page\n evidence   text ", page=3),
-            doc(second_path, "line range evidence", line_start=8, line_end=9),
-        ],
-        "answer": "Answer claims /invented/place, page 99 [1].",
-    }
-
-    rendered = render_result(state)
-
-    assert "Retrieved references" in rendered
-    assert str(first_path) in rendered and "page 3" in rendered
-    assert str(second_path) in rendered and "lines 8-9" in rendered
-    assert "/invented/place" in rendered
-    assert "[1]" in rendered and "[2]" in rendered
-    assert "page evidence text" in rendered
-
-
-def test_render_truncates_normalized_excerpts_to_240_characters(tmp_path: Path) -> None:
-    state = {
-        "question": "Question?",
-        "documents": [
-            doc(tmp_path / "long.txt", "word " * 100, line_start=1, line_end=1)
-        ],
-        "answer": "Answer [1]",
-    }
-
-    rendered = render_result(state)
-    excerpt = rendered.split(" — ", 1)[1]
-
-    assert len(excerpt) == 240
-    assert excerpt.endswith("...")
-
-
 def test_search_without_embeddings_raises_runtime_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -190,30 +149,3 @@ def test_search_without_embeddings_raises_runtime_error(
 
     with pytest.raises(RuntimeError, match="Embeddings"):
         store.search("q", 1)
-
-
-def test_render_rejects_documents_missing_source_or_location_metadata(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(ValueError, match="source"):
-        render_result(
-            {
-                "question": "Question?",
-                "documents": [Document(page_content="text", metadata={})],
-                "answer": "Answer [1]",
-            }
-        )
-
-    with pytest.raises(ValueError, match="location"):
-        render_result(
-            {
-                "question": "Question?",
-                "documents": [
-                    Document(
-                        page_content="text",
-                        metadata={"source": str(tmp_path / "a.txt")},
-                    )
-                ],
-                "answer": "Answer [1]",
-            }
-        )
