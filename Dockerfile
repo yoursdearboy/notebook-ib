@@ -14,10 +14,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=.python-version,target=.python-version \
     uv sync --frozen --no-dev --no-install-project
-COPY pyproject.toml uv.lock README.md .python-version ./
-COPY notebook ./notebook
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
 
 # PostgreSQL 16 + pgvector, with the RAG API alongside it.
 FROM pgvector/pgvector:pg16
@@ -27,6 +23,7 @@ RUN useradd --create-home --uid 1000 app \
 COPY --from=build /opt/python /opt/python
 COPY --from=build --chown=app:app /app/.venv /app/.venv
 COPY --chmod=755 entrypoint.sh /usr/local/bin/notebook-entrypoint.sh
+COPY --chown=app:app notebook /app/notebook
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/home/app/.cache/huggingface \
