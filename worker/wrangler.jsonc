@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "notebook-ib-proxy",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": { "enabled": true },
+  "vars": {
+    // Base URL of the container on the DigitalOcean microVM, e.g. "https://203.0.113.10:8000".
+    "UPSTREAM_URL": "https://CHANGE-ME.example.com",
+    // Header the microVM expects the token in. "Authorization" sends "Bearer <token>".
+    "UPSTREAM_TOKEN_HEADER": "Authorization"
+  }
+  // Secrets (set with `wrangler secret put <NAME>`):
+  //   UPSTREAM_TOKEN - token for the DigitalOcean microVM
+  //   CLIENT_TOKEN   - optional; when set, callers must send "Authorization: Bearer <CLIENT_TOKEN>"
+}
