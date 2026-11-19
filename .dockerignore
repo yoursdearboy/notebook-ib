@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.env
+.env.*
+.open-webui
+.webui_secret_key
+.DS_Store
+.agents
+.pytest_cache
+**/__pycache__
+docs
+tests
+tmp
+worker
