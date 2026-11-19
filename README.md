@@ -67,6 +67,25 @@ Unstructured's automatic strategy extracts embedded PDF text when available and 
 
 ## Open WebUI
 
+The Docker image runs PostgreSQL, the RAG API, Open WebUI, and Nginx in one
+container. Publish only Nginx's port `8080`; Open WebUI and the RAG API listen
+on loopback inside the container.
+
+```sh
+docker build -t notebook-rag .
+docker run -d --name notebook --env-file .env -p 8080:8080 \
+  -e DATABASE_URL=postgresql+psycopg://rag:rag@127.0.0.1:5432/rag \
+  -v notebook-db:/var/lib/postgresql/data \
+  -v notebook-webui:/var/lib/open-webui \
+  notebook-rag
+```
+
+Open http://localhost:8080 and select `notebook-rag`. The command above uses
+the image's default local database credentials; adjust the URL if you
+override them. The Open WebUI volume persists accounts, chats, and settings.
+
+### Local development without the image
+
 The RAG graph is also exposed as an OpenAI-compatible API (`/v1/models`, `/v1/chat/completions`, model id `notebook-rag`), so Open WebUI can chat with the indexed documents. Both run from the uv virtualenv, not in containers. Start PostgreSQL first (`docker compose up -d --wait`), then in two terminals:
 
 ```sh
@@ -89,7 +108,35 @@ Open WebUI stores its embeddings in its own `document_chunk` table in the Compos
 
 Open http://localhost:3000 and select the `notebook-rag` model. Each message is answered independently from the last user message, with references appended. The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra auxiliary requests, each of which would run a RAG query. Open WebUI reads these as initial settings only on first start; afterwards change them in the admin settings.
 
+### Open PDF citations in the sidebar
+
+The bundled Nginx proxy serves the citation viewer and signed PDFs directly.
+The RAG API only generates links.
+
+| Variable | Value |
+| --- | --- |
+| `NOTEBOOK_ASSETS_ROOT` | `/assets` in the Docker deployment. Mount the document folder here read-only and index the files at their `/assets/...` paths. |
+| `NOTEBOOK_ASSETS_BASE_URL` | Public origin for Open WebUI through Nginx, e.g. `https://chat.example.com` (no path), or `http://localhost:8080` for the example above. |
+| `NOTEBOOK_ASSETS_LINK_SECRET` | A random signing key, generated with `openssl rand -hex 32`. Keep it private and stable across restarts. |
+
+Add the settings to the Notebook container's environment and mount the folder with
+`--mount type=bind,src=/absolute/path/to/documents,dst=/assets,readonly`.
+If moving an existing index into the container changes the document paths,
+re-index the documents at their mounted paths.
+
+Ask a new question that cites a PDF, then click a numbered citation in the
+answer (for example, `[1]`). Open WebUI's right sidebar opens the full document
+at the cited page. The **Sources** list still shows text excerpts. Existing
+answers retain their original links.
+
+The browser loads PDF.js from `cdn.jsdelivr.net`. Signed asset links grant access
+to anyone who has the link, independently of Open WebUI login. Rotating the
+signing key invalidates old links.
+
 ## Tests
+
+To check startup of the built image, run
+`bash tests/smoke-container.sh notebook-rag`.
 
 Run the provider-independent checks with:
 
