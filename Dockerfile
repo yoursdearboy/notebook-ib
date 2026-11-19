@@ -26,7 +26,7 @@ RUN useradd --create-home --uid 1000 app \
     && chown -R app:app /home/app/.cache
 COPY --from=build /opt/python /opt/python
 COPY --from=build --chown=app:app /app/.venv /app/.venv
-COPY entrypoint.sh /usr/local/bin/notebook-entrypoint.sh
+COPY --chmod=755 entrypoint.sh /usr/local/bin/notebook-entrypoint.sh
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/home/app/.cache/huggingface \
