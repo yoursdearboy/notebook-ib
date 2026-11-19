@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF citation</title>
+<style>
+  body { margin: 0; font: 14px system-ui; color-scheme: light dark; }
+  #status { margin: 0; padding: 0.75rem; }
+  #pages { display: grid; gap: 0.5rem; padding: 0.5rem; overflow-anchor: none; }
+  .page { position: relative; display: grid; place-items: center; background: Canvas; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+<p id="status" role="status">Loading PDF…</p>
+<main id="pages" aria-label="PDF pages"></main>
+<script type="module">
+  const status = document.getElementById("status");
+  const pages = document.getElementById("pages");
+  const assets = "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624";
+  const url = new URL(location.href);
+  const citedPage = Number(url.searchParams.get("page"));
+  const fail = () => {
+    status.hidden = false;
+    status.textContent = "Could not load the PDF. The citation excerpt is available in the chat’s Sources list.";
+  };
+
+  try {
+    const pdfjs = await import(`${assets}/build/pdf.mjs`);
+    pdfjs.GlobalWorkerOptions.workerSrc = `${assets}/build/pdf.worker.mjs`;
+    const asset = new URL(url.searchParams.get("asset"), url.origin);
+    if (asset.origin !== url.origin || !asset.pathname.startsWith("/citation-assets/files/")) {
+      throw new Error("Invalid citation asset");
+    }
+    asset.searchParams.set("sig", url.searchParams.get("sig"));
+    const pdf = await pdfjs.getDocument({
+      url: asset.href,
+      isEvalSupported: false,
+      cMapUrl: `${assets}/cmaps/`,
+      standardFontDataUrl: `${assets}/standard_fonts/`,
+      wasmUrl: `${assets}/wasm/`,
+    }).promise;
+    const target = Number.isInteger(citedPage) && citedPage > 0 && citedPage <= pdf.numPages
+      ? citedPage : 1;
+    const first = (await pdf.getPage(target)).getViewport({ scale: 1 });
+
+    // Render only pages near the viewport; release canvases after scrolling away.
+    const active = new Map();
+    const observer = new IntersectionObserver(entries => {
+      for (const { target: slot, isIntersecting } of entries) {
+        if (isIntersecting && !active.has(slot)) {
+          const state = {};
+          active.set(slot, state);
+          render(slot, state).catch(error => {
+            if (error.name !== "RenderingCancelledException" && active.get(slot) === state) {
+              slot.textContent = `Could not render page ${slot.dataset.page}.`;
+            }
+          });
+        } else if (!isIntersecting && active.has(slot)) {
+          active.get(slot).task?.cancel();
+          active.delete(slot);
+          slot.replaceChildren();
+        }
+      }
+    }, { rootMargin: "100% 0px" });
+
+    async function render(slot, state) {
+      const page = await pdf.getPage(Number(slot.dataset.page));
+      if (active.get(slot) !== state) return;
+      const size = page.getViewport({ scale: 1 });
+      const scrollTop = document.scrollingElement.scrollTop;
+      const previousHeight = slot.offsetHeight;
+      const above = slot.getBoundingClientRect().bottom <= 0;
+      slot.style.aspectRatio = `${size.width} / ${size.height}`;
+      if (above) document.scrollingElement.scrollTop = scrollTop + slot.offsetHeight - previousHeight;
+      const width = Math.min(1600, Math.max(800, slot.clientWidth * devicePixelRatio));
+      const viewport = page.getViewport({ scale: width / size.width });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      slot.replaceChildren(canvas);
+      state.task = page.render({ canvas, viewport });
+      await state.task.promise;
+    }
+
+    const slots = [];
+    for (let index = 1; index <= pdf.numPages; index++) {
+      const slot = document.createElement("section");
+      slot.className = "page";
+      slot.dataset.page = index;
+      slot.setAttribute("aria-label", `Page ${index} of ${pdf.numPages}`);
+      slot.style.aspectRatio = `${first.width} / ${first.height}`;
+      slots.push(slot);
+    }
+    pages.append(...slots);
+    status.hidden = true;
+    slots[target - 1].scrollIntoView();
+    slots.forEach(slot => observer.observe(slot));
+  } catch {
+    fail();
+  }
+</script>

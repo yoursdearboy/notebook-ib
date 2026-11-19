@@ -17,6 +17,7 @@ from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
+from notebook.asset_citations import asset_embed_url
 from notebook.config import Config
 from notebook.rag import IndexStore, Reference, build_graph, build_references
 
@@ -81,14 +82,15 @@ def _source_event(reference: Reference) -> dict[str, Any]:
     """An Open WebUI citation event; one per chunk so [n] markers line up."""
     path = reference["path"]
     title = f"{Path(path).name} ({reference['location']})"
+    source = {"id": f"{path}#{reference['index']}", "name": title}
+    if embed_url := asset_embed_url(path, reference["location"]):
+        source["embed_url"] = embed_url
     return {
         "type": "source",
         "data": {
-            "source": {"id": f"{path}#{reference['index']}", "name": title},
+            "source": source,
             "document": [reference["content"]],
-            "metadata": [
-                {"source": title, "name": title, "file_path": path}
-            ],
+            "metadata": [{"source": source["id"], "name": title, "file_path": path}],
         },
     }
 
