@@ -24,7 +24,9 @@ from notebook.config import Config
 __all__ = [
     "IndexStore",
     "RagState",
+    "Reference",
     "build_graph",
+    "build_references",
     "render_result",
 ]
 
@@ -247,12 +249,16 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
     return graph.compile()
 
 
-def render_result(state: RagState) -> str:
-    answer = state.get("answer", "")
-    documents = state.get("documents", [])
-    if not documents:
-        return answer
-    references = ["Retrieved references:"]
+class Reference(TypedDict):
+    index: int
+    path: str
+    location: str
+    excerpt: str
+    content: str
+
+
+def build_references(documents: list[Document]) -> list[Reference]:
+    references: list[Reference] = []
     for index, document in enumerate(documents, start=1):
         source = document.metadata.get("source")
         if not isinstance(source, str) or not source:
@@ -271,5 +277,28 @@ def render_result(state: RagState) -> str:
         excerpt = " ".join(document.page_content.split())
         if len(excerpt) > 240:
             excerpt = excerpt[:237].rstrip() + "..."
-        references.append(f"[{index}] {path} ({location}) — {excerpt}")
-    return answer + "\n\n" + "\n".join(references)
+        references.append(
+            Reference(
+                index=index,
+                path=path,
+                location=location,
+                excerpt=excerpt,
+                content=document.page_content,
+            )
+        )
+    return references
+
+
+def render_result(state: RagState, *, include_references: bool = True) -> str:
+    answer = state.get("answer", "")
+    documents = state.get("documents", [])
+    if not documents:
+        return answer
+    references = build_references(documents)
+    if not include_references:
+        return answer
+    lines = ["Retrieved references:"] + [
+        f"[{r['index']}] {r['path']} ({r['location']}) — {r['excerpt']}"
+        for r in references
+    ]
+    return answer + "\n\n" + "\n".join(lines)

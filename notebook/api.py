@@ -8,6 +8,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
@@ -17,7 +18,7 @@ from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
 from notebook.config import Config
-from notebook.rag import IndexStore, build_graph, render_result
+from notebook.rag import IndexStore, Reference, build_graph, build_references, render_result
 
 __all__ = ["app", "create_app"]
 
@@ -76,18 +77,46 @@ def _completion(completion_id: str, created: int, answer: str) -> dict[str, Any]
     }
 
 
-def _stream(completion_id: str, created: int, answer: str) -> Iterator[str]:
-    def chunk(delta: dict[str, Any], finish: Literal["stop"] | None = None) -> str:
+def _source_event(reference: Reference) -> dict[str, Any]:
+    """An Open WebUI citation event; one per chunk so [n] markers line up."""
+    path = reference["path"]
+    title = f"{Path(path).name} ({reference['location']})"
+    return {
+        "type": "source",
+        "data": {
+            "source": {"id": f"{path}#{reference['index']}", "name": title},
+            "document": [reference["content"]],
+            "metadata": [
+                {"source": title, "name": title, "file_path": path}
+            ],
+        },
+    }
+
+
+def _stream(
+    completion_id: str,
+    created: int,
+    answer: str,
+    references: list[Reference] | None = None,
+) -> Iterator[str]:
+    def chunk(
+        delta: dict[str, Any],
+        finish: Literal["stop"] | None = None,
+        **extra: Any,
+    ) -> str:
         payload = {
             "id": completion_id,
             "object": "chat.completion.chunk",
             "created": created,
             "model": MODEL_ID,
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            **extra,
         }
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     yield chunk({"role": "assistant", "content": ""})
+    for reference in references or []:
+        yield chunk({}, event=_source_event(reference))
     yield chunk({"content": answer})
     yield chunk({}, "stop")
     yield "data: [DONE]\n\n"
@@ -132,18 +161,26 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.post("/v1/chat/completions")
     def chat_completions(request: ChatCompletionRequest):
         question = _last_user_question(request.messages)
+        references: list[Reference] = []
         try:
             state = app.state.graph.invoke({"question": question})
-            answer = render_result(state)
+            if request.stream:
+                # Open WebUI shows references as citations; send them as events
+                # instead of appending them to the answer text.
+                references = build_references(state.get("documents", []))
+                answer = render_result(state, include_references=False)
+            else:
+                answer = render_result(state)
         except Exception as exc:
             logger.exception("RAG request failed")
             # Surface errors (e.g. "index not initialized") in the chat itself.
+            references = []
             answer = f"Error: {exc}"
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
         created = int(time.time())
         if request.stream:
             return StreamingResponse(
-                _stream(completion_id, created, answer),
+                _stream(completion_id, created, answer, references),
                 media_type="text/event-stream",
             )
         return _completion(completion_id, created, answer)

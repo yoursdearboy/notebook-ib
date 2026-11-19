@@ -40,3 +40,6 @@ webui = [
 
 [tool.uv]
 override-dependencies = ["pyarrow==22.0.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
