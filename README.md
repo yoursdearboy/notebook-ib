@@ -80,8 +80,9 @@ docker run -d --name notebook --env-file .env -p 8080:8080 \
   notebook-rag
 ```
 
-Open http://localhost:8080 and select `notebook-rag`. The command above uses
-the image's default local database credentials; adjust the URL if you
+Open http://localhost:8080. The image selects `notebook` by default and disables
+Chat Controls and Attach Webpage for regular users. The command above uses
+the image's default local database credentials. Adjust the URL if you
 override them. The Open WebUI volume persists accounts, chats, and settings.
 
 ### Local development without the image
@@ -99,6 +100,8 @@ VECTOR_DB=pgvector PGVECTOR_DB_URL=postgresql+psycopg://rag:rag@127.0.0.1:6024/r
 OPENAI_API_BASE_URL=http://localhost:8000/v1 OPENAI_API_KEY=not-needed \
 ENABLE_OLLAMA_API=false ENABLE_TITLE_GENERATION=false ENABLE_TAGS_GENERATION=false \
 ENABLE_FOLLOW_UP_GENERATION=false ENABLE_AUTOCOMPLETE_GENERATION=false \
+DEFAULT_MODELS=notebook-rag \
+USER_PERMISSIONS_CHAT_CONTROLS=false USER_PERMISSIONS_CHAT_WEB_UPLOAD=false \
 uv run open-webui serve --port 3000
 ```
 
@@ -106,7 +109,11 @@ Open WebUI stores its users, chats, and settings in `.open-webui/webui.db`. The 
 
 Open WebUI stores its embeddings in its own `document_chunk` table in the Compose PostgreSQL database. If you use a different PostgreSQL instance, set `PGVECTOR_DB_URL` to its connection URL. The `notebook-rag` model still queries the notebook's document index through the RAG API.
 
-Open http://localhost:3000 and select the `notebook-rag` model. Each message is answered independently from the last user message, with references appended. The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra auxiliary requests, each of which would run a RAG query. Open WebUI reads these as initial settings only on first start; afterwards change them in the admin settings.
+Open http://localhost:3000. The model appears as `notebook` and keeps the API ID `notebook-rag`. Keep the OpenAI-compatible connection available to all signed-in users if everyone should be able to use the model. Each answer uses the last user message and includes references.
+
+The Docker image and the local command set the same initial Open WebUI defaults. `DEFAULT_MODELS=notebook-rag` selects the model. `USER_PERMISSIONS_CHAT_CONTROLS=false` hides the Chat Controls panel, and `USER_PERMISSIONS_CHAT_WEB_UPLOAD=false` disables Attach Webpage for regular users. Admins are exempt from those permissions. If Open WebUI already has saved settings, set the default model in the admin model settings and update **Chat Controls** and **Allow Web Upload** under **Admin Panel > Users > Groups > Default Permissions** and in any applicable group permissions.
+
+The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra requests that would each run a RAG query. Change these in the admin settings if Open WebUI has already saved their values.
 
 ### Open PDF citations in the sidebar
 

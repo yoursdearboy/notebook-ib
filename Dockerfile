@@ -34,6 +34,9 @@ COPY deploy/nginx.conf deploy/assets.js deploy/asset-viewer.html /etc/nginx/
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/home/app/.cache/huggingface \
+    DEFAULT_MODELS=notebook-rag \
+    USER_PERMISSIONS_CHAT_CONTROLS=false \
+    USER_PERMISSIONS_CHAT_WEB_UPLOAD=false \
     PORT=8000 \
     POSTGRES_USER=rag \
     POSTGRES_PASSWORD=rag \
