@@ -1,6 +1,7 @@
+from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from notebook.models import ExtractiveChatModel, init_chat_model
+from notebook.models import ExtractiveChatModel
 
 
 def test_extractive_model_answers_with_top_passage_and_citation() -> None:
@@ -16,6 +17,10 @@ def test_extractive_model_answers_with_top_passage_and_citation() -> None:
     answer = init_chat_model("extractive:top-passage").invoke(prompt).text
 
     assert answer == "The comet was green. It was bright. [1]"
+
+
+def test_extractive_provider_resolves_through_langchain() -> None:
+    assert isinstance(init_chat_model("extractive:top-passage"), ExtractiveChatModel)
 
 
 def test_extractive_model_truncates_long_passages() -> None:
