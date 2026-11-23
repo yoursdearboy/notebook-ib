@@ -6,9 +6,11 @@ import re
 from pathlib import Path
 from typing import ClassVar
 
+from langchain.embeddings import init_embeddings
+
 from notebook.config import Config
 from notebook.documents import index_path
-from notebook.models import init_chat_model, init_embeddings
+from notebook.models import init_chat_model
 from notebook.rag import IndexStore, RagState, build_graph, build_references
 
 __all__ = ["main"]
@@ -112,18 +114,14 @@ def main(argv: list[str] | None = None) -> int:
     store: IndexStore | None = None
     try:
         if args.command == "index":
-            embeddings = init_embeddings(
-                config.embedding_model, dimension=config.embedding_dimension
-            )
+            embeddings = init_embeddings(config.embedding_model)
             store = IndexStore(config, embeddings)
             failures = index_path(args.path, config, store, embeddings)
             return 1 if failures else 0
 
         store = IndexStore(config)
         store.check_compatible()
-        store.embeddings = init_embeddings(
-            config.embedding_model, dimension=config.embedding_dimension
-        )
+        store.embeddings = init_embeddings(config.embedding_model)
         model = init_chat_model(config.chat_model)
         state = build_graph(store, model, config.retrieval_k).invoke(
             {"question": args.question}

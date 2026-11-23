@@ -4,7 +4,7 @@ This command-line tool indexes local text, Markdown, and PDFs into PostgreSQL wi
 
 ## Setup
 
-Copy the smoke-test configuration and start PostgreSQL:
+Copy the local development configuration and start PostgreSQL:
 
 ```sh
 cp .env.example .env
@@ -16,12 +16,12 @@ uv run python -m notebook.migration
 The initialization command creates the RAG schema in the default database, `rag` on `localhost:6024`. Run it after starting PostgreSQL and before indexing or asking questions. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts. Model selection is configured in `.env` using LangChain `provider:model` identifiers:
 
 ```dotenv
-CHAT_MODEL=fake:smoke-test
-EMBEDDING_MODEL=fake:deterministic
-EMBEDDING_DIMENSION=16
+CHAT_MODEL=extractive:top-passage
+EMBEDDING_MODEL=huggingface:sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_DIMENSION=384
 ```
 
-The example uses LangChain test doubles. Chat returns a fixed answer with a citation, and deterministic embeddings let you exercise indexing and retrieval without semantic ranking. This works without model downloads, API keys, or Ollama. For real answers, set your providers’ LangChain `provider:model` identifiers, credentials, and embedding dimension. Changing the embedding model or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
+The example configuration is built for lightweight local development. Embeddings use the small `all-MiniLM-L6-v2` model (about 90 MB, downloaded on first use, no API key), so retrieval is real semantic search. The `extractive:top-passage` chat backend runs no LLM: it answers with the top retrieved passage and its citation, so the output shows what retrieval returned. For generated answers, set a LangChain `provider:model` chat identifier and its credentials, and optionally a stronger embedding model such as `huggingface:BAAI/bge-m3` with `EMBEDDING_DIMENSION=1024`. Changing the embedding model or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
 
 ## Use
 

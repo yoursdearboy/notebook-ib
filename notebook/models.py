@@ -1,21 +1,57 @@
-"""Initialize provider models and lightweight development substitutes."""
+"""Chat model factory with a dependency-free local backend for development."""
+
+import re
+from typing import Any
 
 from langchain.chat_models import init_chat_model as init_provider_chat_model
-from langchain.embeddings import init_embeddings as init_provider_embeddings
-from langchain_core.embeddings import DeterministicFakeEmbedding, Embeddings
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+
+__all__ = ["ExtractiveChatModel", "init_chat_model"]
+
+EXTRACTIVE_MODEL = "extractive:top-passage"
+
+_EVIDENCE = re.compile(
+    r"^\[(\d+)\] Source: [^\n]*\n(?:Evidence text:\n)?(.*?)(?=\n\n\[\d+\] Source: |\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+class ExtractiveChatModel(BaseChatModel):
+    """Answers with the top retrieved passage instead of generating text.
+
+    It needs no LLM, credentials, or downloads, and its output shows exactly
+    what retrieval returned, so it is useful for developing the pipeline.
+    """
+
+    max_chars: int = 600
+
+    @property
+    def _llm_type(self) -> str:
+        return "extractive"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        prompt = str(messages[-1].content)
+        match = _EVIDENCE.search(prompt)
+        if match is None:
+            text = "No evidence found in the prompt."
+        else:
+            passage = " ".join(match.group(2).split())
+            if len(passage) > self.max_chars:
+                passage = passage[: self.max_chars].rstrip() + "…"
+            text = f"{passage} [{match.group(1)}]"
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
 
 
 def init_chat_model(model: str) -> BaseChatModel:
-    if model == "fake:smoke-test":
-        return FakeListChatModel(
-            responses=["Local smoke test. See the retrieved source [1]."]
-        )
+    if model == EXTRACTIVE_MODEL:
+        return ExtractiveChatModel()
     return init_provider_chat_model(model)
-
-
-def init_embeddings(model: str, *, dimension: int) -> Embeddings:
-    if model == "fake:deterministic":
-        return DeterministicFakeEmbedding(size=dimension)
-    return init_provider_embeddings(model)
