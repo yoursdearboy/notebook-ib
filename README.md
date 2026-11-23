@@ -4,11 +4,10 @@ This command-line tool indexes local text, Markdown, and PDFs into PostgreSQL wi
 
 ## Setup
 
-Copy the example configuration, set credentials for your chosen providers, and start PostgreSQL:
+Copy the smoke-test configuration and start PostgreSQL:
 
 ```sh
 cp .env.example .env
-# Set provider credentials in .env (e.g. GOOGLE_API_KEY for Google models)
 docker compose up -d --wait
 uv sync
 uv run python -m notebook.migration
@@ -17,12 +16,12 @@ uv run python -m notebook.migration
 The initialization command creates the RAG schema in the default database, `rag` on `localhost:6024`. Run it after starting PostgreSQL and before indexing or asking questions. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts. Model selection is configured in `.env` using LangChain `provider:model` identifiers:
 
 ```dotenv
-CHAT_MODEL=google_genai:gemini-3.7-flash
-EMBEDDING_MODEL=huggingface:BAAI/bge-m3
-EMBEDDING_DIMENSION=1024
+CHAT_MODEL=fake:smoke-test
+EMBEDDING_MODEL=fake:deterministic
+EMBEDDING_DIMENSION=16
 ```
 
-Any LangChain `provider:model` identifier can be configured for chat and embeddings along with that provider's standard API key environment variable (such as `GOOGLE_API_KEY` for `google_genai` or `OPENAI_API_KEY` for `openai`). Embeddings default to the local Hugging Face model `BAAI/bge-m3`; its weights are downloaded on first use. Changing the embedding model or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
+The example uses LangChain test doubles. Chat returns a fixed answer with a citation, and deterministic embeddings let you exercise indexing and retrieval without semantic ranking. This works without model downloads, API keys, or Ollama. For real answers, set your providers’ LangChain `provider:model` identifiers, credentials, and embedding dimension. Changing the embedding model or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
 
 ## Use
 

@@ -143,7 +143,7 @@ def test_directory_index_continues_after_corrupt_pdf_and_returns_failure(
     (tmp_path / "good.txt").write_text("A known fact.\n", encoding="utf-8")
     (tmp_path / "bad.pdf").write_bytes(b"not a pdf")
     store = FakeStore()
-    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "init_embeddings", lambda model, **kwargs: FakeEmbeddings())
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
 
     result = app.main(["index", str(tmp_path)])
@@ -162,7 +162,7 @@ def test_index_requires_initialization_and_rejects_fresh_option(
 ) -> None:
     set_config_env(monkeypatch)
     (tmp_path / "source.txt").write_text("A known fact.\n", encoding="utf-8")
-    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "init_embeddings", lambda model, **kwargs: FakeEmbeddings())
     monkeypatch.setattr(
         app, "IndexStore", lambda *args, **kwargs: pytest.fail("store created")
     )
@@ -179,7 +179,7 @@ def test_index_checks_compatibility_before_writing(
     (tmp_path / "source.txt").write_text("A known fact.\n", encoding="utf-8")
     events: list[str] = []
     store = FakeStore(events=events)
-    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "init_embeddings", lambda model, **kwargs: FakeEmbeddings())
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
 
     result = app.main(["index", str(tmp_path)])
@@ -203,7 +203,7 @@ def test_index_stops_when_schema_is_not_initialized(
         )
 
     store.check_compatible = fail_compatibility_check  # type: ignore[method-assign]
-    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "init_embeddings", lambda model, **kwargs: FakeEmbeddings())
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
 
     result = app.main(["index", str(source)])
@@ -239,7 +239,7 @@ def test_embedding_failure_does_not_replace_existing_source(
         Document(id="old", page_content="old version", metadata={"source": str(source)})
     ]
     monkeypatch.setattr(
-        app, "init_embeddings", lambda model: FakeEmbeddings(fail=True)
+        app, "init_embeddings", lambda model, **kwargs: FakeEmbeddings(fail=True)
     )
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
 
@@ -301,7 +301,7 @@ def test_ask_checks_compatibility_before_provider_factories_and_closes_store(
 
     recorded_models: list[str] = []
 
-    def make_embeddings(model: str) -> FakeEmbeddings:
+    def make_embeddings(model: str, *, dimension: int) -> FakeEmbeddings:
         events.append("embeddings")
         recorded_models.append(model)
         return FakeEmbeddings()
@@ -343,7 +343,7 @@ def test_cli_errors_redact_database_passwords(
     set_config_env(monkeypatch, DATABASE_URL=secret_url)
     store = FakeStore()
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings=None: store)
-    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "init_embeddings", lambda model, **kwargs: FakeEmbeddings())
 
     def raise_model_error(model: str) -> Any:
         raise RuntimeError(f"model failed at {secret_url}")

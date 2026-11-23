@@ -13,12 +13,11 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from langchain.chat_models import init_chat_model
-from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
 from notebook.asset_citations import asset_embed_url
 from notebook.config import Config
+from notebook.models import init_chat_model, init_embeddings
 from notebook.rag import IndexStore, Reference, build_graph, build_references
 
 __all__ = ["app", "create_app"]
@@ -128,7 +127,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         cfg = config or Config.from_env()
-        store = IndexStore(cfg, init_embeddings(cfg.embedding_model))
+        store = IndexStore(
+            cfg, init_embeddings(cfg.embedding_model, dimension=cfg.embedding_dimension)
+        )
         app.state.store = store
         app.state.graph = build_graph(
             store, init_chat_model(cfg.chat_model), cfg.retrieval_k
