@@ -1,10 +1,9 @@
-"""Registers a dependency-free local chat backend for development."""
+"""Chat model factory with a dependency-free local backend for development."""
 
 import re
 from typing import Any
 
-from langchain.chat_models import base as _chat_models
-from langchain.chat_models import init_chat_model
+from langchain.chat_models import init_chat_model as init_provider_chat_model
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
@@ -50,11 +49,8 @@ class ExtractiveChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
 
 
-# LangChain has no public hook for adding chat providers, so register in its
-# provider table. This makes `CHAT_MODEL=extractive:<name>` resolve through the
-# standard `init_chat_model`; the model name after the colon is ignored.
-_chat_models._SUPPORTED_PROVIDERS["extractive"] = (
-    __name__,
-    ExtractiveChatModel.__name__,
-    lambda cls, model, **kwargs: cls(**kwargs),
-)
+def init_chat_model(model: str) -> BaseChatModel:
+    """Build `extractive:<name>` locally (the name is ignored); defer the rest to LangChain."""
+    if model.startswith("extractive:"):
+        return ExtractiveChatModel()
+    return init_provider_chat_model(model)
