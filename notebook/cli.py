@@ -73,7 +73,12 @@ def _create_parser() -> argparse.ArgumentParser:
         "index", help="Index a file or recursively scan a directory"
     )
     index_parser.add_argument(
-        "path", type=Path, help="Text, Markdown, PDF, or directory of supported files"
+        "path",
+        type=Path,
+        help="Text, Markdown, PDF, .video.json transcript, or directory",
+    )
+    index_parser.add_argument(
+        "--video-url", help="Playback URL for the .video.json transcript"
     )
     index_parser.add_argument(
         "--pdf-loader",
@@ -116,7 +121,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "index":
             embeddings = init_embeddings(config.embedding_model)
             store = IndexStore(config, embeddings)
-            failures = index_path(args.path, config, store, embeddings)
+            failures = index_path(
+                args.path, config, store, embeddings, video_url=args.video_url
+            )
             return 1 if failures else 0
 
         store = IndexStore(config)

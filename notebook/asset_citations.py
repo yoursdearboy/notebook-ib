@@ -4,7 +4,7 @@ import hmac
 import os
 import re
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import SplitResult, quote, urlencode, urlsplit
 
 ASSET_ROUTE = "/citation-assets"
 
@@ -23,25 +23,44 @@ def _asset_path(root: Path, file: str) -> Path | None:
     return None
 
 
+def parse_video_url(value: object) -> SplitResult | None:
+    if (
+        not isinstance(value, str)
+        or not re.match(r"https?://", value, re.IGNORECASE)
+        or re.search(r"[\s\\]", value)
+    ):
+        return None
+    try:
+        url = urlsplit(value)
+        if url.hostname and url.username is None and url.port != 0:
+            return url
+    except ValueError:
+        pass
+    return None
+
+
+def _asset_origin() -> str | None:
+    base_url = os.getenv("NOTEBOOK_ASSETS_BASE_URL", "").rstrip("/")
+    base = parse_video_url(base_url)
+    if base and not (base.path or base.query or base.fragment):
+        return base_url
+    return None
+
+
+def video_embed_url(video_url: str, start_seconds: float) -> str | None:
+    base_url = _asset_origin()
+    if not (base_url and parse_video_url(video_url)):
+        return None
+    query = urlencode({"video": video_url, "start": start_seconds})
+    return f"{base_url}{ASSET_ROUTE}/view?{query}"
+
+
 def asset_embed_url(source: str, location: str) -> str | None:
     root_dir = os.getenv("NOTEBOOK_ASSETS_ROOT")
-    base_url = os.getenv("NOTEBOOK_ASSETS_BASE_URL", "").rstrip("/")
+    base_url = _asset_origin()
     secret = os.getenv("NOTEBOOK_ASSETS_LINK_SECRET")
     page = re.fullmatch(r"page ([1-9][0-9]*)", location)
     if not (root_dir and base_url and secret and page):
-        return None
-    try:
-        base = urlsplit(base_url)
-    except ValueError:
-        return None
-    if (
-        base.scheme not in ("http", "https")
-        or not base.hostname
-        or base.username is not None
-        or base.path
-        or base.query
-        or base.fragment
-    ):
         return None
     root = Path(root_dir).expanduser().resolve()
     path = _asset_path(root, source)

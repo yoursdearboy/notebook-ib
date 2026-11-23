@@ -6,6 +6,7 @@ import math
 import re
 import uuid
 from pathlib import Path
+from typing import NotRequired
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -195,6 +196,27 @@ def _validate_citations(answer: str, reference_count: int) -> None:
             raise ValueError(f"The answer contains an unknown reference [{citation}].")
 
 
+def _document_location(document: Document) -> str | None:
+    metadata = document.metadata
+    if isinstance(metadata.get("video_url"), str) and type(
+        start := metadata.get("start_seconds")
+    ) in (int, float):
+        seconds, milliseconds = divmod(round(start * 1000), 1000)
+        hours, seconds = divmod(seconds, 3600)
+        minutes, seconds = divmod(seconds, 60)
+        timecode = f"{hours:02}:{minutes:02}:{seconds:02}"
+        if milliseconds:
+            timecode += f".{milliseconds:03}"
+        return f"time {timecode}"
+    if isinstance(metadata.get("page"), int):
+        return f"page {metadata['page']}"
+    if isinstance(metadata.get("line_start"), int) and isinstance(
+        metadata.get("line_end"), int
+    ):
+        return f"lines {metadata['line_start']}-{metadata['line_end']}"
+    return None
+
+
 def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStateGraph:
     def retrieve(state: RagState) -> dict[str, list[Document]]:
         return {"documents": store.search(state["question"], k)}
@@ -206,15 +228,7 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
         context_parts = []
         for index, document in enumerate(documents, start=1):
             metadata = document.metadata
-            location = (
-                f"page {metadata['page']}"
-                if "page" in metadata
-                else (
-                    f"lines {metadata['line_start']}-{metadata['line_end']}"
-                    if "line_start" in metadata and "line_end" in metadata
-                    else "location unavailable"
-                )
-            )
+            location = _document_location(document) or "location unavailable"
             context_parts.append(
                 f"[{index}] Source: {metadata.get('source', 'unknown source')} ({location})\n"
                 f"Evidence text:\n{document.page_content}"
@@ -254,6 +268,8 @@ class Reference(TypedDict):
     location: str
     excerpt: str
     content: str
+    video_url: NotRequired[str]
+    start_seconds: NotRequired[float]
 
 
 def build_references(documents: list[Document]) -> list[Reference]:
@@ -263,26 +279,23 @@ def build_references(documents: list[Document]) -> list[Reference]:
         if not isinstance(source, str) or not source:
             raise ValueError("A retrieved document is missing its source path metadata.")
         path = str(Path(source).expanduser().resolve())
-        if isinstance(document.metadata.get("page"), int):
-            location = f"page {document.metadata['page']}"
-        elif isinstance(document.metadata.get("line_start"), int) and isinstance(
-            document.metadata.get("line_end"), int
-        ):
-            location = f"lines {document.metadata['line_start']}-{document.metadata['line_end']}"
-        else:
+        location = _document_location(document)
+        if location is None:
             raise ValueError(
-                "A retrieved document is missing its page or line location metadata."
+                "A retrieved document is missing its page, line, or video location metadata."
             )
         excerpt = " ".join(document.page_content.split())
         if len(excerpt) > 240:
             excerpt = excerpt[:237].rstrip() + "..."
-        references.append(
-            Reference(
-                index=index,
-                path=path,
-                location=location,
-                excerpt=excerpt,
-                content=document.page_content,
-            )
+        reference = Reference(
+            index=index,
+            path=path,
+            location=location,
+            excerpt=excerpt,
+            content=document.page_content,
         )
+        if location.startswith("time "):
+            reference["video_url"] = document.metadata["video_url"]
+            reference["start_seconds"] = document.metadata["start_seconds"]
+        references.append(reference)
     return references

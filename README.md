@@ -1,6 +1,6 @@
 # Local document RAG proof of concept
 
-This command-line tool indexes local text, Markdown, and PDFs into PostgreSQL with pgvector. It answers each question independently and prints references to the indexed source file and page or line range.
+This command-line tool indexes local text, Markdown, PDFs, and timecoded video transcripts into PostgreSQL with pgvector. It answers each question independently and prints references to the indexed source file and page, line range, or video timecode.
 
 ## Setup
 
@@ -114,6 +114,35 @@ Open http://localhost:3000. The model appears as `notebook` and keeps the API ID
 The Docker image and the local command set the same initial Open WebUI defaults. `DEFAULT_MODELS=notebook-rag` selects the model. `USER_PERMISSIONS_CHAT_CONTROLS=false` hides the Chat Controls panel, and `USER_PERMISSIONS_CHAT_WEB_UPLOAD=false` disables Attach Webpage for regular users. Admins are exempt from those permissions. If Open WebUI already has saved settings, set the default model in the admin model settings and update **Chat Controls** and **Allow Web Upload** under **Admin Panel > Users > Groups > Default Permissions** and in any applicable group permissions.
 
 The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra requests that would each run a RAG query. Change these in the admin settings if Open WebUI has already saved their values.
+
+### Index a video transcript
+
+Index each video transcript individually. Save it as `demo.video.json` and pass
+the playback URL with `--video-url`. The index stores the URL in the document
+metadata.
+
+```bash
+uv run python -m notebook index ./demo.video.json --video-url 'https://media.example.com/demo.mp4'
+```
+
+```json
+{
+  "segments": [
+    {"start": "00:00:12.500", "text": "Introduction to the library."},
+    {"start": 67, "text": "How to search the index."}
+  ]
+}
+```
+
+Use chronological segment starts as seconds or `HH:MM:SS[.mmm]`. Search uses the
+segment text, and citations link to the segment start. For the sidebar player,
+set `NOTEBOOK_ASSETS_BASE_URL` to the public origin of the bundled Nginx proxy.
+The player supports YouTube and Kinescope videos with embedding enabled, as well
+as direct media URLs the browser can play, such as HTTPS MP4 or WebM. For
+Kinescope, pass either `https://kinescope.io/VIDEO_ID` or
+`https://kinescope.io/embed/VIDEO_ID` as `--video-url`. If Kinescope restricts
+embedding by domain, allow the public Open WebUI domain. YouTube starts at
+whole-second precision. The video URL is sent to the browser in the citation link.
 
 ### Open PDF citations in the sidebar
 

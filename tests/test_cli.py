@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from langchain_core.documents import Document
@@ -9,6 +10,7 @@ from langchain_core.messages import AIMessage
 
 import notebook.cli as app
 from notebook import migration
+from notebook.api import _source_event
 from notebook.config import Config
 
 
@@ -445,3 +447,32 @@ def test_render_rejects_documents_missing_source_or_location_metadata(
                 "answer": "Answer [1]",
             }
         )
+
+
+def test_video_transcript_indexes_text_and_links_to_the_cited_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_config_env(monkeypatch, NOTEBOOK_ASSETS_BASE_URL="https://chat.example.com")
+    transcript = tmp_path / "demo.video.json"
+    transcript.write_text(
+        '{"segments":[{"start":0,"text":"Introduction"},'
+        '{"start":"00:01:07.250","text":"Search the library"}]}',
+        encoding="utf-8",
+    )
+    url = "https://media.example.com/demo.mp4?quality=hd"
+    store = FakeStore()
+    monkeypatch.setattr(app, "IndexStore", lambda *args: store)
+    monkeypatch.setattr(app, "init_embeddings", lambda *args: FakeEmbeddings())
+
+    assert app.main(["index", str(transcript), "--video-url", url]) == 0
+    assert [doc.page_content for doc in store.documents] == [
+        "Introduction",
+        "Search the library",
+    ]
+    reference = app.build_references(store.documents)[1]
+    assert reference["location"] == "time 00:01:07.250"
+    citation = _source_event(reference)["data"]
+    embed = urlsplit(citation["source"]["embed_url"])
+    assert embed.path == "/citation-assets/view"
+    assert parse_qs(embed.query) == {"video": [url], "start": ["67.25"]}
+    assert citation["document"] == ["Search the library"]

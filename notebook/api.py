@@ -17,7 +17,7 @@ from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
-from notebook.asset_citations import asset_embed_url
+from notebook.asset_citations import asset_embed_url, video_embed_url
 from notebook.config import Config
 from notebook.rag import IndexStore, Reference, build_graph, build_references
 
@@ -83,7 +83,11 @@ def _source_event(reference: Reference) -> dict[str, Any]:
     path = reference["path"]
     title = f"{Path(path).name} ({reference['location']})"
     source = {"id": f"{path}#{reference['index']}", "name": title}
-    if embed_url := asset_embed_url(path, reference["location"]):
+    if "video_url" in reference and "start_seconds" in reference:
+        embed_url = video_embed_url(reference["video_url"], reference["start_seconds"])
+    else:
+        embed_url = asset_embed_url(path, reference["location"])
+    if embed_url:
         source["embed_url"] = embed_url
     return {
         "type": "source",

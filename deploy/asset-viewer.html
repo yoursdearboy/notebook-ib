@@ -8,6 +8,8 @@
   #status { margin: 0; padding: 0.75rem; }
   #pages { display: grid; gap: 0.5rem; padding: 0.5rem; overflow-anchor: none; }
   .page { position: relative; display: grid; place-items: center; background: Canvas; }
+  #video-player { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; background: black; }
+  #video-link { display: block; padding: 0.75rem; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 </style>
 <p id="status" role="status">Loading PDF…</p>
@@ -23,7 +25,75 @@
     status.textContent = "Could not load the PDF. The citation excerpt is available in the chat’s Sources list.";
   };
 
-  try {
+  function showVideo() {
+    document.title = "Video citation";
+    status.textContent = "Could not load the video. The transcript excerpt is available in the chat’s Sources list.";
+    try {
+      const video = new URL(url.searchParams.get("video"));
+      const start = Number(url.searchParams.get("start"));
+      if (!["http:", "https:"].includes(video.protocol) || video.username || video.password
+          || !url.searchParams.has("start") || !Number.isFinite(start) || start < 0) return;
+
+      let youtubeId;
+      if (video.hostname === "youtu.be") {
+        youtubeId = video.pathname.split("/")[1];
+      } else if (["youtube.com", "www.youtube.com", "m.youtube.com",
+                  "www.youtube-nocookie.com", "youtube-nocookie.com"].includes(video.hostname)) {
+        youtubeId = video.pathname === "/watch" ? video.searchParams.get("v")
+          : video.pathname.match(/^\/(?:embed|shorts|live)\/([\w-]+)\/?$/)?.[1];
+      }
+
+      const kinescopeId = video.hostname === "kinescope.io"
+        ? video.pathname.match(/^\/(?:embed\/)?([a-zA-Z0-9_-]+)\/?$/)?.[1]
+        : undefined;
+
+      let player;
+      if (youtubeId && /^[\w-]{11}$/.test(youtubeId)) {
+        const seconds = Math.floor(start);
+        player = document.createElement("iframe");
+        player.src = `https://www.youtube-nocookie.com/embed/${youtubeId}?start=${seconds}`;
+        player.title = "YouTube video";
+        player.allowFullscreen = true;
+        player.referrerPolicy = "strict-origin-when-cross-origin";
+        video.href = `https://www.youtube.com/watch?v=${youtubeId}&t=${seconds}s`;
+      } else if (kinescopeId) {
+        video.protocol = "https:";
+        video.port = "";
+        video.pathname = `/${kinescopeId}`;
+        video.searchParams.set("t", start);
+        const embed = new URL(video);
+        embed.pathname = `/embed/${kinescopeId}`;
+        player = document.createElement("iframe");
+        player.src = embed.href;
+        player.title = "Kinescope video";
+        player.allow = "autoplay; fullscreen; picture-in-picture; encrypted-media";
+        player.referrerPolicy = "strict-origin-when-cross-origin";
+      } else {
+        video.hash = `t=${start.toFixed(3)}`;
+        player = document.createElement("video");
+        player.controls = true;
+        player.playsInline = true;
+        player.preload = "metadata";
+        player.src = video.href;
+        player.addEventListener("error", () => { status.hidden = false; });
+      }
+      player.id = "video-player";
+      const link = document.createElement("a");
+      link.id = "video-link";
+      link.href = video.href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Open video at the cited time";
+      status.hidden = true;
+      document.body.append(player, link);
+    } catch {
+      status.hidden = false;
+    }
+  }
+
+  if (url.searchParams.has("video")) {
+    showVideo();
+  } else try {
     const pdfjs = await import(`${assets}/build/pdf.mjs`);
     pdfjs.GlobalWorkerOptions.workerSrc = `${assets}/build/pdf.worker.mjs`;
     const asset = new URL(url.searchParams.get("asset"), url.origin);
