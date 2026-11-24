@@ -1,5 +1,5 @@
 {
-  "name": "notebook-ib-proxy",
+  "name": "notebook-ib",
   "private": true,
   "type": "module",
   "scripts": {
