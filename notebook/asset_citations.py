@@ -32,7 +32,9 @@ def _asset_path(root: Path, file: str) -> Path | None:
     return None
 
 
-def asset_embed_url(source: str, location: str) -> str | None:
+def asset_embed_url(
+    source: str, location: str, title: str | None = None
+) -> str | None:
     root_dir = os.getenv("NOTEBOOK_ASSETS_ROOT")
     base_url = os.getenv("NOTEBOOK_ASSETS_BASE_URL", "").rstrip("/")
     secret = os.getenv("NOTEBOOK_ASSETS_LINK_SECRET")
@@ -58,7 +60,11 @@ def asset_embed_url(source: str, location: str) -> str | None:
         return None
     uri = f"{ASSET_ROUTE}/files/{path.relative_to(root).as_posix()}"
     signature = hmac.digest(secret.encode(), uri.encode(), "sha256").hex()
-    query = urlencode({"asset": quote(uri), "sig": signature, "page": page[1]})
+    params = {"asset": quote(uri), "sig": signature, "page": page[1]}
+    if title:
+        # Display-only; not covered by the signature.
+        params["title"] = title
+    query = urlencode(params)
     return f"{base_url}{ASSET_ROUTE}/view?{query}"
 
 

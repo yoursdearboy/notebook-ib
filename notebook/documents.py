@@ -45,7 +45,9 @@ def index_path(
     config: Config,
     store: IndexStore,
     embeddings: Embeddings,
+    title: str | None = None,
 ) -> int:
+    title = (title or "").strip() or None
     try:
         files = discover_paths(path)
     except Exception as exc:
@@ -54,13 +56,16 @@ def index_path(
     if not files:
         logger.error("No supported documents found in %s.", path)
         return 1
+    if title and len(files) != 1:
+        logger.error("A title can only be given when indexing a single file.")
+        return 1
     store.check_compatible()
     succeeded = 0
     failed = 0
     total_chunks = 0
     for source in files:
         try:
-            chunks = prepare_chunks(source, config)
+            chunks = prepare_chunks(source, config, title=title)
             vectors = embeddings.embed_documents(
                 [chunk.page_content for chunk in chunks]
             )
@@ -155,6 +160,7 @@ def _split_text(
     config: Config,
     page: int | None = None,
     ordinal_start: int = 0,
+    title: str | None = None,
 ) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=config.chunk_size,
@@ -191,6 +197,8 @@ def _split_text(
             "split_signature": signature,
             "chunk_index": ordinal,
         }
+        if title:
+            metadata["title"] = title
         if page is not None:
             metadata["page"] = page
         else:
@@ -210,7 +218,9 @@ def _split_text(
     return chunks
 
 
-def prepare_chunks(path: Path, config: Config) -> list[Document]:
+def prepare_chunks(
+    path: Path, config: Config, title: str | None = None
+) -> list[Document]:
     path = Path(path)
     files = discover_paths(path)
     if path.is_dir():
@@ -237,6 +247,7 @@ def prepare_chunks(path: Path, config: Config) -> list[Document]:
                         config=config,
                         page=page,
                         ordinal_start=len(chunks),
+                        title=title,
                     )
                 )
     else:
@@ -247,6 +258,7 @@ def prepare_chunks(path: Path, config: Config) -> list[Document]:
             source_hash=source_hash,
             signature=signature,
             config=config,
+            title=title,
         )
     if not chunks:
         raise ValueError(f"Source has no usable text chunks: {source}")

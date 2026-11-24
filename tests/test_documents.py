@@ -281,3 +281,16 @@ def test_source_is_stored_relative_to_assets_root(tmp_path: Path, monkeypatch) -
     monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(moved))
     again = prepare_chunks(moved / "sub" / "notes.md", config())
     assert [c.id for c in again] == [c.id for c in chunks]
+
+
+def test_title_is_stored_in_chunk_metadata_and_references(tmp_path: Path) -> None:
+    from notebook.rag import build_references
+
+    source = tmp_path / "notes.txt"
+    source.write_text("The comet was blue.\n", encoding="utf-8")
+
+    chunks = prepare_chunks(source, config(), title="Comet notes")
+    assert {chunk.metadata["title"] for chunk in chunks} == {"Comet notes"}
+    assert build_references(chunks)[0]["title"] == "Comet notes"
+    assert "title" not in prepare_chunks(source, config())[0].metadata
+    assert build_references(prepare_chunks(source, config()))[0]["title"] is None

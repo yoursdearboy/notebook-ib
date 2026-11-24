@@ -214,8 +214,9 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
                     else "location unavailable"
                 )
             )
+            label = metadata.get("title") or metadata.get("source", "unknown source")
             context_parts.append(
-                f"[{index}] Source: {metadata.get('source', 'unknown source')} ({location})\n"
+                f"[{index}] Source: {label} ({location})\n"
                 f"Evidence text:\n{document.page_content}"
             )
         prompt = [
@@ -250,6 +251,7 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
 class Reference(TypedDict):
     index: int
     path: str
+    title: str | None
     location: str
     excerpt: str
     content: str
@@ -262,6 +264,9 @@ def build_references(documents: list[Document]) -> list[Reference]:
         if not isinstance(source, str) or not source:
             raise ValueError("A retrieved document is missing its source path metadata.")
         path = source
+        title = document.metadata.get("title")
+        if not isinstance(title, str) or not title.strip():
+            title = None
         if isinstance(document.metadata.get("page"), int):
             location = f"page {document.metadata['page']}"
         elif isinstance(document.metadata.get("line_start"), int) and isinstance(
@@ -279,6 +284,7 @@ def build_references(documents: list[Document]) -> list[Reference]:
             Reference(
                 index=index,
                 path=path,
+                title=title,
                 location=location,
                 excerpt=excerpt,
                 content=document.page_content,

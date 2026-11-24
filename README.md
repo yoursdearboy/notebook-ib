@@ -32,6 +32,12 @@ uv run python -m notebook index ./documents
 uv run python -m notebook ask "What color was the comet?"
 ```
 
+Give a single file a display title with `--title`; it replaces the file name and page or line location in references and in the PDF viewer heading. Reindexing without `--title` clears it.
+
+```sh
+uv run python -m notebook index ./documents/q3.pdf --title "Q3 financial report"
+```
+
 If the embedding model or dimension changes, rebuild the index from scratch:
 
 ```sh

@@ -97,3 +97,25 @@ def test_relative_source_is_resolved_against_assets_root(tmp_path, monkeypatch):
     source = _source_event(reference)["data"]["source"]
     args = parse_qs(urlsplit(source["embed_url"]).query)
     assert args["asset"] == ["/citation-assets/files/sub/doc.pdf"]
+
+
+def test_title_names_the_citation_and_the_viewer_link(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
+    monkeypatch.setenv("NOTEBOOK_ASSETS_BASE_URL", "https://chat.example.com")
+    monkeypatch.setenv("NOTEBOOK_ASSETS_LINK_SECRET", "test-only")
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=400)
+    writer.write(tmp_path / "a.pdf")
+    reference = build_references(
+        [
+            Document(
+                page_content="E",
+                metadata={"source": "a.pdf", "page": 1, "title": "Annual report"},
+            )
+        ]
+    )[0]
+
+    citation = _source_event(reference)["data"]
+    assert citation["source"]["name"] == "Annual report"
+    args = parse_qs(urlsplit(citation["source"]["embed_url"]).query)
+    assert args["title"] == ["Annual report"]

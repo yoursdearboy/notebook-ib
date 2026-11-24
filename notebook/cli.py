@@ -21,10 +21,10 @@ def render_result(state: RagState) -> str:
     documents = state.get("documents", [])
     if not documents:
         return answer
-    lines = ["Retrieved references:"] + [
-        f"[{r['index']}] {r['path']} ({r['location']}) — {r['excerpt']}"
-        for r in build_references(documents)
-    ]
+    lines = ["Retrieved references:"]
+    for r in build_references(documents):
+        label = r["title"] or f"{r['path']} ({r['location']})"
+        lines.append(f"[{r['index']}] {label} — {r['excerpt']}")
     return answer + "\n\n" + "\n".join(lines)
 
 
@@ -76,6 +76,10 @@ def _create_parser() -> argparse.ArgumentParser:
         "path", type=Path, help="Text, Markdown, PDF, or directory of supported files"
     )
     index_parser.add_argument(
+        "--title",
+        help="Display title for the document, shown in references (single file only)",
+    )
+    index_parser.add_argument(
         "--pdf-loader",
         choices=("pypdf", "unstructured"),
         default="pypdf",
@@ -116,7 +120,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "index":
             embeddings = init_embeddings(config.embedding_model)
             store = IndexStore(config, embeddings)
-            failures = index_path(args.path, config, store, embeddings)
+            failures = index_path(
+                args.path, config, store, embeddings, title=args.title
+            )
             return 1 if failures else 0
 
         store = IndexStore(config)

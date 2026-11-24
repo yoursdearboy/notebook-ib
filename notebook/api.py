@@ -81,9 +81,9 @@ def _completion(completion_id: str, created: int, answer: str) -> dict[str, Any]
 def _source_event(reference: Reference) -> dict[str, Any]:
     """An Open WebUI citation event; one per chunk so [n] markers line up."""
     path = reference["path"]
-    title = f"{Path(path).name} ({reference['location']})"
+    title = reference["title"] or f"{Path(path).name} ({reference['location']})"
     source = {"id": f"{path}#{reference['index']}", "name": title}
-    if embed_url := asset_embed_url(path, reference["location"]):
+    if embed_url := asset_embed_url(path, reference["location"], reference["title"]):
         source["embed_url"] = embed_url
     return {
         "type": "source",
