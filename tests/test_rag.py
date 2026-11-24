@@ -348,3 +348,44 @@ def test_empty_structured_text_fails_clearly(tmp_path: Path) -> None:
         build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
             {"question": "Q?"}
         )
+
+
+class BrokenStructuredModel(FakeModel):
+    """Supports structured output, but the structured call misbehaves."""
+
+    def __init__(self, outcome: Any) -> None:
+        super().__init__("Plain answer [1]")
+        self.outcome = outcome
+
+    def with_structured_output(self, schema: Any) -> Any:
+        outcome = self.outcome
+
+        class Bound:
+            def invoke(self, prompt: Any) -> Any:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+
+        return Bound()
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        None,  # the model answered in plain text without calling the schema tool
+        {"text": "x", "starts": [{"citation": 1, "cue": "c3"}]},  # unparsable start
+        ValueError("could not parse the tool call"),
+        object(),
+    ],
+)
+def test_unusable_structured_output_falls_back_to_the_plain_answer(
+    tmp_path: Path, outcome: Any
+) -> None:
+    model = BrokenStructuredModel(outcome)
+
+    state = build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
+        {"question": "Q?"}
+    )
+
+    assert state["answer"] == "Plain answer [1]"
+    assert state["starts"] == {}

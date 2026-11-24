@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import re
 import uuid
@@ -27,6 +28,8 @@ from notebook.video_start import (
     is_video,
     select_starts,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "IndexStore",
@@ -258,10 +261,22 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
                 structured = model.with_structured_output(StructuredAnswer)
             except NotImplementedError:
                 structured = None
+        result: StructuredAnswer | None = None
         if structured is not None:
-            result = structured.invoke(prompt)
-            if isinstance(result, dict):
-                result = StructuredAnswer.model_validate(result)
+            # A video must never make the answer fail: a model may skip the
+            # schema tool or produce an unparsable start, so fall back to a
+            # plain answer with the default starts.
+            try:
+                raw = structured.invoke(prompt)
+                if isinstance(raw, dict):
+                    raw = StructuredAnswer.model_validate(raw)
+                result = raw if isinstance(raw, StructuredAnswer) else None
+            except Exception:
+                logger.warning(
+                    "Structured answer failed; answering without chosen video starts.",
+                    exc_info=True,
+                )
+        if result is not None:
             answer, starts = result.text, select_starts(documents, result.starts)
         else:
             response = model.invoke(prompt)
