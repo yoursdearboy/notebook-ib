@@ -2879,6 +2879,7 @@ dependencies = [
     { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.15' or sys_platform != 'linux'" },
     { name = "torch", version = "2.15.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'linux'" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "webvtt-py" },
 ]
 
 [package.dev-dependencies]
@@ -2910,6 +2911,7 @@ requires-dist = [
     { name = "torch", marker = "python_full_version >= '3.15' or sys_platform != 'linux'", specifier = ">=2.14" },
     { name = "torch", marker = "python_full_version < '3.15' and sys_platform == 'linux'", specifier = ">=2.14", index = "https://download.pytorch.org/whl/cpu" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "webvtt-py", specifier = ">=0.8.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -5818,6 +5820,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/21/e6/26d09fab466b7ca9c7737474c52be4f76a40301b08362eb2dbc19dcc16c1/websockets-15.0.1.tar.gz", hash = "sha256:82544de02076bafba038ce055ee6412d68da13ab47f0c60cab827346de828dee", size = 177016, upload-time = "2025-03-05T20:03:41.606Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fa/a8/5b41e0da817d64113292ab1f8247140aac61cbf6cfd085d6a0fa77f4984f/websockets-15.0.1-py3-none-any.whl", hash = "sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f", size = 169743, upload-time = "2025-03-05T20:03:39.41Z" },
+]
+
+[[package]]
+name = "webvtt-py"
+version = "0.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/83/0f8bbcf97562172eeba23e133626f9c54125c545833b368ead9aeb20366e/webvtt_py-0.8.0.tar.gz", hash = "sha256:86c4e14ff787975bc29345b896ea156c26c24fa8a3e558a80eb8e575bb81d9bb", size = 156492, upload-time = "2026-11-08T20:21:29.74Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/3d/d0e2e3f6b0026ccc528fa4f2aa075ebe733a0242106cb518c7077aadc6ae/webvtt_py-0.8.0-py3-none-any.whl", hash = "sha256:1780a77dd04cbcf69b323e58fd3148a2409c224376d3bafda01ef9cdfdd78524", size = 61443, upload-time = "2026-11-08T20:21:28.302Z" },
 ]
 
 [[package]]
