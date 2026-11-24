@@ -276,3 +276,118 @@ def test_title_is_stored_in_chunk_metadata_and_references(tmp_path: Path) -> Non
     assert build_references(chunks)[0]["title"] == "Comet notes"
     assert "title" not in prepare_chunks(source, config())[0].metadata
     assert build_references(prepare_chunks(source, config()))[0]["title"] is None
+
+
+VTT = (
+    "WEBVTT\n\n"
+    "00:00:00.000 --> 00:00:05.000\nfirst cue.\n\n"
+    "00:00:30.000 --> 00:00:35.000\nsecond cue is here.\n"
+)
+
+
+def write_lecture(tmp_path: Path, video: str | None = "lec.mp4") -> Path:
+    vtt = tmp_path / "lec.vtt"
+    vtt.write_text(VTT, encoding="utf-8")
+    if video:
+        (tmp_path / video).write_bytes(b"video")
+    return vtt
+
+
+def test_vtt_with_sibling_video_stores_times_cues_lead_in_and_video_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("NOTEBOOK_ASSETS_ROOT", raising=False)
+    vtt = write_lecture(tmp_path)
+
+    chunks = prepare_chunks(vtt, config(CHUNK_SIZE="25", CHUNK_OVERLAP="0"))
+
+    assert len(chunks) == 2
+    m = chunks[1].metadata
+    assert (m["start"], m["end"], m["cue_start"], m["cue_end"]) == (30.0, 35.0, 1, 1)
+    assert m["lead_in"] == [{"cue": 0, "t": 0.0, "text": "first cue."}]
+    assert m["video_file"] == str((tmp_path / "lec.mp4").resolve())
+    assert "video_url" not in m
+    assert m["source"] == str(vtt.resolve())
+
+
+def test_vtt_video_file_is_stored_relative_to_assets_root(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
+    vtt = write_lecture(tmp_path, "lec.webm")
+
+    chunks = prepare_chunks(vtt, config())
+
+    assert chunks[0].metadata["source"] == "lec.vtt"
+    assert chunks[0].metadata["video_file"] == "lec.webm"
+
+
+def test_vtt_with_video_url_stores_the_canonical_url(tmp_path: Path) -> None:
+    vtt = write_lecture(tmp_path, video=None)
+
+    chunks = prepare_chunks(
+        vtt, config(), video_url="https://kinescope.io/embed/abc123"
+    )
+
+    assert chunks[0].metadata["video_url"] == "https://kinescope.io/abc123"
+    assert "video_file" not in chunks[0].metadata
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "no_video",
+        "both",
+        "not_kinescope",
+        "ambiguous_siblings",
+        "video_url_on_text",
+        "no_cues",
+    ],
+)
+def test_invalid_video_pairing_is_rejected(tmp_path: Path, case: str) -> None:
+    url = "https://kinescope.io/abc123"
+    if case == "no_video":
+        with pytest.raises(ValueError):
+            prepare_chunks(write_lecture(tmp_path, video=None), config())
+    elif case == "both":
+        with pytest.raises(ValueError):
+            prepare_chunks(write_lecture(tmp_path), config(), video_url=url)
+    elif case == "not_kinescope":
+        with pytest.raises(ValueError):
+            prepare_chunks(
+                write_lecture(tmp_path, video=None),
+                config(),
+                video_url="https://youtu.be/abc123",
+            )
+    elif case == "ambiguous_siblings":
+        vtt = write_lecture(tmp_path)
+        (tmp_path / "lec.webm").write_bytes(b"video")
+        with pytest.raises(ValueError):
+            prepare_chunks(vtt, config())
+    elif case == "video_url_on_text":
+        notes = tmp_path / "notes.txt"
+        notes.write_text("some notes\n", encoding="utf-8")
+        with pytest.raises(ValueError):
+            prepare_chunks(notes, config(), video_url=url)
+    else:
+        vtt = write_lecture(tmp_path)
+        vtt.write_text("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n<b></b>\n")
+        with pytest.raises(ValueError):
+            prepare_chunks(vtt, config())
+
+
+def test_split_signature_differs_for_transcripts(tmp_path: Path) -> None:
+    vtt = write_lecture(tmp_path)
+    notes = tmp_path / "notes.txt"
+    notes.write_text("first cue.\n", encoding="utf-8")
+
+    assert (
+        prepare_chunks(vtt, config())[0].metadata["split_signature"]
+        != prepare_chunks(notes, config())[0].metadata["split_signature"]
+    )
+
+
+def test_discovery_includes_vtt_files(tmp_path: Path) -> None:
+    write_lecture(tmp_path)
+
+    assert [p.name for p in discover_paths(tmp_path)] == ["lec.vtt"]
