@@ -1,6 +1,6 @@
 # Local document RAG proof of concept
 
-Index local text, Markdown, and PDFs into PostgreSQL with pgvector, then ask questions about them in Open WebUI. Each answer uses the latest question and includes references to the source file and page or line range.
+Index local text, Markdown, PDFs, and video transcripts into PostgreSQL with pgvector, then ask questions about them in Open WebUI. Each answer uses the latest question and includes references to the source file and its page, line range, or video time.
 
 ## Setup
 
@@ -23,7 +23,7 @@ uv run bin/frontend .open-webui/frontend
 uv run bin/serve
 ```
 
-Open [Open WebUI](http://localhost:8000) and use the Bioinformatics Institute model. Index documents as shown in [Use](#use) before asking a question; clicking a citation to a PDF opens it in the sidebar at the cited page. `bin/serve` runs Open WebUI, the RAG API (`/v1/models` and `/v1/chat/completions`), and the citation viewer as one app. It does not run migrations or build the frontend, and it exits if any of the required variables above is empty.
+Open [Open WebUI](http://localhost:8000) and use the Bioinformatics Institute model. Index documents as shown in [Use](#use) before asking a question; clicking a citation to a PDF opens it in the sidebar at the cited page, and a citation to a video opens the video shortly before the cited moment. `bin/serve` runs Open WebUI, the RAG API (`/v1/models` and `/v1/chat/completions`), and the citation viewer as one app. It does not run migrations or build the frontend, and it exits if any of the required variables above is empty.
 
 The RAG schema lives in the default database, `rag` on `localhost:6024`. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts.
 
@@ -33,11 +33,20 @@ Clicking a numbered citation, or a Sources entry, that points to a PDF opens the
 
 | Variable | Value |
 | --- | --- |
-| `NOTEBOOK_ASSETS_ROOT` | The folder holding the documents (`./documents` by default). Index files at their paths under it; the index records relative paths, so the folder can move without re-indexing. Sources outside it, and non-PDF sources, get no sidebar link. |
+| `NOTEBOOK_ASSETS_ROOT` | The folder holding the documents (`./documents` by default). Index files at their paths under it; the index records relative paths, so the folder can move without re-indexing. Sources outside it, and text and Markdown sources, get no sidebar link. |
 | `NOTEBOOK_ASSETS_BASE_URL` | Public origin of the app, with no path: `http://localhost:8000` locally (match `HOST` and `PORT`), or e.g. `https://chat.example.com` behind nginx. |
 | `NOTEBOOK_ASSETS_LINK_SECRET` | The signing key generated above. |
 
 By default `bin/serve` serves the viewer and the signed PDFs itself. The links are built from `NOTEBOOK_ASSETS_BASE_URL`, so the assets may instead be served from S3 or a CDN.
+
+### Video citations
+
+A video is indexed from its WebVTT transcript (`.vtt`), which a separate transcriber produces; this app does not transcribe. Pair the transcript with its video in one of two ways:
+
+- **Local video:** put a `.mp4` or `.webm` with the same name next to the transcript (`lecture.vtt` and `lecture.mp4`), under `NOTEBOOK_ASSETS_ROOT`. Directories index like any other, and the video is served with signed links like the PDFs.
+- **Kinescope:** index a single transcript with the video's URL, `uv run python -m notebook index lecture.vtt --video-url https://kinescope.io/VIDEO_ID`. Kinescope is the only supported third-party host. The player is Kinescope's own embed, so this needs no `NOTEBOOK_ASSETS_*` settings.
+
+A transcript with neither, or with both, is not indexed. Transcript chunks follow cue boundaries, and a citation reads `video 12:40`, the time of the cited passage. The sidebar player opens earlier than that: the model chooses where a student should start watching from the transcript just before the passage (up to 60 seconds back). If the chat model cannot return structured output, as with `extractive:top-passage`, or it picks an invalid start, playback starts at the cited passage itself. Reindex a transcript after changing its video URL.
 
 ### Model configuration
 
@@ -133,7 +142,7 @@ The browser loads PDF.js from `cdn.jsdelivr.net` and the PDF viewer's font from 
 Run the provider-independent checks with:
 
 ```sh
-uv run pytest tests/test_documents.py tests/test_rag.py tests/test_cli.py -q
+uv run pytest tests/test_documents.py tests/test_rag.py tests/test_cli.py tests/test_transcripts.py tests/test_video_hosts.py tests/test_video_start.py -q
 ```
 
 Storage integration tests use a separate database named `rag_test`; they never touch the application database. They expect the schema to exist, so create and initialize it once with the fake embedding model the tests use, then run them:
