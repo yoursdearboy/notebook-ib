@@ -35,6 +35,7 @@ class FakeModel:
         self.result = result
         self.calls = calls if calls is not None else []
         self.prompts: list[Any] = []
+        self.structured_requests = 0
 
     def invoke(self, prompt: Any) -> Any:
         self.calls.append("generate")
@@ -42,6 +43,10 @@ class FakeModel:
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
+
+    def with_structured_output(self, schema: Any) -> Any:
+        self.structured_requests += 1
+        raise NotImplementedError
 
 
 def doc(source: Path, content: str, **metadata: object) -> Document:
@@ -224,3 +229,122 @@ def test_video_chunk_location_appears_in_the_prompt(tmp_path: Path) -> None:
     graph.invoke({"question": "Q?"})
 
     assert "(video 12:40)" in model.prompts[0][1].content
+
+
+class StructuredFakeModel(FakeModel):
+    """A model that supports structured output and returns a prepared answer."""
+
+    def __init__(self, structured: Any) -> None:
+        super().__init__()
+        self.structured = structured
+        self.schemas: list[Any] = []
+
+    def with_structured_output(self, schema: Any) -> Any:
+        self.schemas.append(schema)
+        model = self
+
+        class Bound:
+            def invoke(self, prompt: Any) -> Any:
+                model.calls.append("generate")
+                model.prompts.append(prompt)
+                return model.structured
+
+        return Bound()
+
+
+def cued_doc(tmp_path: Path) -> Document:
+    return doc(
+        tmp_path / "lec.vtt",
+        "cited words",
+        start=100.0,
+        end=130.0,
+        cue_start=5,
+        cue_end=6,
+        video_file="lec.mp4",
+        lead_in=[{"cue": 3, "t": 70.0, "text": "earlier words"}],
+    )
+
+
+def test_video_chunks_use_structured_output_and_return_starts(tmp_path: Path) -> None:
+    from notebook.video_start import StructuredAnswer, VideoStart
+
+    model = StructuredFakeModel(
+        StructuredAnswer(text="Explained [1]", starts=[VideoStart(citation=1, cue=3)])
+    )
+
+    state = build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
+        {"question": "Q?"}
+    )
+
+    assert state["answer"] == "Explained [1]"
+    assert state["starts"] == {1: 70.0}
+    assert model.schemas == [StructuredAnswer]
+    prompt = model.prompts[0][1].content
+    assert "c3 [1:10] earlier words" in prompt
+
+
+def test_model_without_structured_output_falls_back_to_plain_answer(
+    tmp_path: Path,
+) -> None:
+    model = FakeModel("Plain answer [1]")
+
+    state = build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
+        {"question": "Q?"}
+    )
+
+    assert state["answer"] == "Plain answer [1]"
+    assert state["starts"] == {}
+    assert model.structured_requests == 1
+
+
+def test_pdf_only_retrieval_never_asks_for_structured_output(tmp_path: Path) -> None:
+    model = FakeModel("Answer [1]")
+
+    state = build_graph(
+        FakeStore([doc(tmp_path / "a.txt", "fact", line_start=1, line_end=1)], []),
+        model,
+        k=1,
+    ).invoke({"question": "Q?"})
+
+    assert model.structured_requests == 0
+    assert state["starts"] == {}
+
+
+def test_invalid_model_starts_never_fail_the_answer(tmp_path: Path) -> None:
+    from notebook.video_start import StructuredAnswer, VideoStart
+
+    model = StructuredFakeModel(
+        StructuredAnswer(
+            text="Explained [1]",
+            starts=[VideoStart(citation=7, cue=3), VideoStart(citation=1, cue=99)],
+        )
+    )
+
+    state = build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
+        {"question": "Q?"}
+    )
+
+    assert state["answer"] == "Explained [1]"
+    assert state["starts"] == {}
+
+
+def test_citations_in_structured_text_are_still_validated(tmp_path: Path) -> None:
+    from notebook.video_start import StructuredAnswer
+
+    model = StructuredFakeModel(StructuredAnswer(text="Wrong [7]"))
+
+    with pytest.raises(ValueError, match="unknown reference"):
+        build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
+            {"question": "Q?"}
+        )
+
+
+def test_empty_structured_text_fails_clearly(tmp_path: Path) -> None:
+    from notebook.video_start import StructuredAnswer
+
+    model = StructuredFakeModel(StructuredAnswer(text="  "))
+
+    with pytest.raises(ValueError, match="no usable text"):
+        build_graph(FakeStore([cued_doc(tmp_path)], []), model, k=1).invoke(
+            {"question": "Q?"}
+        )

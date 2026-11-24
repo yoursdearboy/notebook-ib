@@ -172,7 +172,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             # Open WebUI shows references as citations, so they are sent as
             # events rather than appended to the answer text.
             answer = state["answer"]
-            references = build_references(state.get("documents", []))
+            references = build_references(
+                state.get("documents", []), state.get("starts")
+            )
         except Exception as exc:
             logger.exception("RAG request failed")
             # Surface errors (e.g. "index not initialized") in the chat itself.
