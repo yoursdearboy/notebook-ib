@@ -5,11 +5,12 @@ from langchain_core.documents import Document
 from pypdf import PdfWriter
 
 from notebook.api import _source_event, create_app
+from notebook.config import Config
 from notebook.rag import build_references
 
 
 def test_models_list_uses_friendly_name_and_preserves_api_id() -> None:
-    response = TestClient(create_app()).get("/v1/models")
+    response = TestClient(create_app(Config())).get("/v1/models")
 
     assert response.status_code == 200
     assert response.json()["data"][0]["id"] == "notebook-rag"
@@ -39,7 +40,7 @@ def test_pdf_citation_embeds_the_full_document_at_the_cited_page(tmp_path, monke
     assert len(args["sig"][0]) == 64
     assert citation["document"] == ["Evidence"]
 
-    client = TestClient(create_app())
+    client = TestClient(create_app(Config()))
     assert client.get(url.path).status_code == 404
     assert (
         client.get(args["asset"][0], params={"sig": args["sig"][0]}).status_code == 404

@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Build an Open WebUI frontend whose Sources list opens the PDF viewer.
+
+Open WebUI always opens its Sources popup when a numbered entry in an answer's
+Sources list is clicked, and it does not reload the sidebar iframe when the same
+citation is clicked twice. Neither can be changed through settings, so this
+copies the installed frontend and patches the compiled Citations chunk:
+
+* a Sources-list click calls the same handler as an inline ``[n]`` citation, so
+  sources with an ``embed_url`` open in the sidebar viewer;
+* each click gets a unique ``source_id`` query parameter, so the iframe reloads
+  and the viewer jumps back to the cited page.
+
+Usage: ``bin/frontend OUT_DIR``, then start Open WebUI with
+``FRONTEND_BUILD_DIR=OUT_DIR``. The build fails if the chunk no longer has the
+expected shape, e.g. after an Open WebUI upgrade.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+_HANDLER = re.compile(r',"showSourceModal",(\w+)\)')
+_LIST_ITEM = re.compile(r"(\w+)\.textContent=(\w+)\+1")
+_LIST_CLICK = re.compile(
+    r'\("click",(\w+),\(\)=>\{(\w+)\((\w+),!0\),\2\((\w+),\w+\((\w+)\)\)\}\)'
+)
+_SOURCE_ID = re.compile(r"sourceId:(\w+)\}\)")
+
+
+def _only(pattern: re.Pattern[str], text: str, what: str) -> re.Match[str]:
+    matches = pattern.findall(text)
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Unsupported Open WebUI build: expected one {what}, found {len(matches)}."
+        )
+    return pattern.search(text)  # type: ignore[return-value]
+
+
+def patch_citations(js: str) -> str:
+    handler = _only(_HANDLER, js, "showSourceModal export").group(1)
+    item = _only(_LIST_ITEM, js, "Sources list item index").group(2)
+    click = _only(_LIST_CLICK, js, "Sources list click handler")
+    js = js.replace(
+        click.group(0),
+        f'("click",{click.group(1)},()=>{{{handler}({item}+1)}})',
+        1,
+    )
+    source_id = _only(_SOURCE_ID, js, "embed sourceId")
+    return js.replace(
+        source_id.group(0),
+        f'sourceId:{source_id.group(1)}+"~"+Date.now()}})',
+        1,
+    )
+
+
+def _link_or_copy(src: str, dst: str) -> None:
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def build(out: Path) -> None:
+    spec = importlib.util.find_spec("open_webui")
+    if spec is None or spec.origin is None:
+        raise RuntimeError("open_webui is not installed (uv sync --group webui).")
+    source = Path(spec.origin).parent / "frontend"
+    if not source.is_dir():
+        raise RuntimeError(f"Open WebUI frontend not found at {source}.")
+    if out.resolve() == source.resolve():
+        raise RuntimeError("OUT_DIR must differ from the installed frontend.")
+
+    chunks = [
+        path
+        for path in (source / "_app" / "immutable").rglob("*.js")
+        if '"showSourceModal"' in (text := path.read_text(encoding="utf-8"))
+        and "embed_url" in text
+    ]
+    if len(chunks) != 1:
+        raise RuntimeError(
+            f"Unsupported Open WebUI build: expected one Citations chunk, found {len(chunks)}."
+        )
+    chunk = chunks[0]
+    patched = patch_citations(chunk.read_text(encoding="utf-8"))
+
+    if out.exists():
+        shutil.rmtree(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # Starlette refuses symlinks, so link files by hard link (or copy across
+    # filesystems) instead; only the patched chunk is rewritten.
+    shutil.copytree(source, out, copy_function=_link_or_copy)
+    target = out / chunk.relative_to(source)
+    target.unlink()
+    target.write_text(patched, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit("usage: bin/frontend OUT_DIR")
+    try:
+        build(Path(sys.argv[1]))
+    except RuntimeError as error:
+        sys.exit(str(error))

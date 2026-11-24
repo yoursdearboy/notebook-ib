@@ -21,7 +21,7 @@ from notebook.config import Config
 from notebook.models import init_chat_model
 from notebook.rag import IndexStore, Reference, build_graph, build_references
 
-__all__ = ["app", "create_app"]
+__all__ = ["create_app"]
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +125,11 @@ def _stream(
 
 
 def create_app(config: Config | None = None) -> FastAPI:
+    config = config or Config.from_env()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        cfg = config or Config.from_env()
+        cfg = config
         store = IndexStore(cfg, init_embeddings(cfg.embedding_model))
         app.state.store = store
         app.state.graph = build_graph(
@@ -187,5 +189,3 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     return app
 
-
-app = create_app()

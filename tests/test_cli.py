@@ -8,7 +8,6 @@ from langchain_core.documents import Document
 from langchain_core.messages import AIMessage
 
 import notebook.cli as app
-from notebook import migration
 from notebook.config import Config
 
 
@@ -68,7 +67,7 @@ class FakeStore:
 
 def set_config_env(monkeypatch: pytest.MonkeyPatch, **values: str) -> None:
     defaults = {
-        "DATABASE_URL": "postgresql+psycopg://rag:fake-password@localhost:6024/rag",
+        "RAG_DATABASE_URL": "postgresql+psycopg://rag:fake-password@localhost:6024/rag",
     }
     defaults.update(values)
     for key, value in defaults.items():
@@ -213,21 +212,6 @@ def test_index_stops_when_schema_is_not_initialized(
     assert "not initialized" in caplog.text.lower()
 
 
-def test_migration_cli_passes_fresh_to_initializer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    set_config_env(monkeypatch)
-    calls: list[bool] = []
-    monkeypatch.setattr(
-        migration, "initialize_rag", lambda config, fresh=False: calls.append(fresh)
-    )
-
-    result = migration.main(["--fresh"])
-
-    assert result == 0
-    assert calls == [True]
-
-
 def test_embedding_failure_does_not_replace_existing_source(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
@@ -340,7 +324,7 @@ def test_cli_errors_redact_database_passwords(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     secret_url = "postgresql+psycopg://rag:fake-password@localhost:6024/rag"
-    set_config_env(monkeypatch, DATABASE_URL=secret_url)
+    set_config_env(monkeypatch, RAG_DATABASE_URL=secret_url)
     store = FakeStore()
     monkeypatch.setattr(app, "IndexStore", lambda config, embeddings=None: store)
     monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
@@ -445,3 +429,11 @@ def test_render_rejects_documents_missing_source_or_location_metadata(
                 "answer": "Answer [1]",
             }
         )
+
+
+def test_config_reads_rag_database_url_not_database_url() -> None:
+    url = "postgresql+psycopg://rag:rag@db.example:5432/rag"
+
+    assert Config.from_env({"RAG_DATABASE_URL": url}).database_url == url
+    ignored = Config.from_env({"DATABASE_URL": "sqlite:///webui.db"})
+    assert ignored.database_url == Config().database_url

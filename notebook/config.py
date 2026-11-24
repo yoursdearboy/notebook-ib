@@ -53,7 +53,7 @@ class Config:
                 embedding_model=embedding_model,
                 embedding_dimension=int(values.get("EMBEDDING_DIMENSION", "1024")),
                 database_url=values.get(
-                    "DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:6024/rag"
+                    "RAG_DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:6024/rag"
                 ),
                 chunk_size=int(values.get("CHUNK_SIZE", "1000")),
                 chunk_overlap=int(values.get("CHUNK_OVERLAP", "200")),

@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Run the API, citation assets and Open WebUI: ``uv run bin/serve``.
+
+Does not run migrations or build the frontend; run ``bin/migrate`` and
+``bin/frontend`` first. Settings come from ``.env`` (see ``.env.example``).
+"""
+
+import os
+import sys
+
+from dotenv import load_dotenv
+
+
+def main() -> None:
+    import uvicorn
+
+    load_dotenv()
+    if not os.environ.get("WEBUI_SECRET_KEY"):
+        sys.exit("WEBUI_SECRET_KEY must be set (for example: openssl rand -hex 32).")
+    uvicorn.run(
+        "notebook.app:create_app",
+        factory=True,
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "8000")),
+    )
+
+
+if __name__ == "__main__":
+    main()

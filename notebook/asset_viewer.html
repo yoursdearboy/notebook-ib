@@ -3,12 +3,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PDF citation</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/web/pdf_viewer.css">
 <style>
   body { margin: 0; font: 14px system-ui; color-scheme: light dark; }
   #status { margin: 0; padding: 0.75rem; }
   #pages { display: grid; gap: 0.5rem; padding: 0.5rem; overflow-anchor: none; }
   .page { position: relative; display: grid; place-items: center; background: Canvas; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .textLayer { width: 100%; height: 100%; }
 </style>
 <p id="status" role="status">Loading PDF…</p>
 <main id="pages" aria-label="PDF pages"></main>
@@ -56,6 +58,7 @@
           });
         } else if (!isIntersecting && active.has(slot)) {
           active.get(slot).task?.cancel();
+          active.get(slot).text?.cancel();
           active.delete(slot);
           slot.replaceChildren();
         }
@@ -76,9 +79,19 @@
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
-      slot.replaceChildren(canvas);
+      const layer = document.createElement("div");
+      layer.className = "textLayer";
+      layer.style.setProperty("--total-scale-factor", slot.clientWidth / size.width);
+      slot.replaceChildren(canvas, layer);
       state.task = page.render({ canvas, viewport });
       await state.task.promise;
+      if (active.get(slot) !== state) return;
+      state.text = new pdfjs.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: layer,
+        viewport: page.getViewport({ scale: slot.clientWidth / size.width }),
+      });
+      await state.text.render();
     }
 
     const slots = [];

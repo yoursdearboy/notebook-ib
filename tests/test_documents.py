@@ -232,7 +232,7 @@ def test_config_defaults_use_provider_model_identifiers() -> None:
 
 def test_config_repr_does_not_include_secret() -> None:
     configured = config(
-        DATABASE_URL="postgresql+psycopg://rag:db-secret@localhost:6024/rag",
+        RAG_DATABASE_URL="postgresql+psycopg://rag:db-secret@localhost:6024/rag",
     )
     assert "db-secret" not in repr(configured)
 

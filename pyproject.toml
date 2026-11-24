@@ -1,3 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["notebook"]
+
 [project]
 name = "notebook-ib"
 version = "0.1.0"
@@ -42,7 +49,7 @@ webui = [
 [tool.uv]
 override-dependencies = ["pyarrow==22.0.0"]
 
-# CPU-only PyTorch on Linux (Docker image); macOS wheels on PyPI are CPU-only already.
+# CPU-only PyTorch on Linux; macOS wheels on PyPI are CPU-only already.
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
