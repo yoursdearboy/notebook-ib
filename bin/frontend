@@ -8,6 +8,8 @@ copies the installed frontend and patches the compiled Citations chunk:
 
 * a Sources-list click calls the same handler as an inline ``[n]`` citation, so
   sources with an ``embed_url`` open in the sidebar viewer;
+* the DESIGN.md theme (``notebook/theme.css``) is linked from ``index.html``;
+* the Attach Webpage item of the + menu is hidden;
 * each click gets a unique ``source_id`` query parameter, so the iframe reloads
   and the viewer jumps back to the cited page.
 
@@ -59,6 +61,26 @@ def patch_citations(js: str) -> str:
     )
 
 
+_ATTACH_LABEL = '.t("Attach Webpage")'
+_ITEM_CLASS = "get class(){return`"
+
+
+def hide_attach_webpage(js: str) -> str:
+    """Hide the "Attach Webpage" entry of the chat input's + menu.
+
+    Admins are exempt from the web-upload permission, so no setting hides it.
+    The item's class template is the last one before its label.
+    """
+    if js.count(_ATTACH_LABEL) != 1:
+        raise RuntimeError("Unsupported Open WebUI build: Attach Webpage item not found.")
+    label = js.index(_ATTACH_LABEL)
+    start = js.rfind(_ITEM_CLASS, 0, label)
+    if start < 0 or label - start > 800:
+        raise RuntimeError("Unsupported Open WebUI build: Attach Webpage item class not found.")
+    at = start + len(_ITEM_CLASS)
+    return js[:at] + "hidden " + js[at:]
+
+
 def _link_or_copy(src: str, dst: str) -> None:
     try:
         os.link(src, dst)
@@ -98,6 +120,39 @@ def build(out: Path) -> None:
     target = out / chunk.relative_to(source)
     target.unlink()
     target.write_text(patched, encoding="utf-8")
+
+    menus = [
+        path
+        for path in (source / "_app" / "immutable").rglob("*.js")
+        if _ATTACH_LABEL in (text := path.read_text(encoding="utf-8"))
+        and "upload web content" in text
+    ]
+    if len(menus) != 1:
+        raise RuntimeError(
+            f"Unsupported Open WebUI build: expected one input menu chunk, found {len(menus)}."
+        )
+    target = out / menus[0].relative_to(source)
+    hidden = hide_attach_webpage(menus[0].read_text(encoding="utf-8"))
+    target.unlink()
+    target.write_text(hidden, encoding="utf-8")
+    install_theme(out)
+
+
+def install_theme(out: Path) -> None:
+    """Add the DESIGN.md stylesheet and link it after Open WebUI's custom.css."""
+    theme = Path(__file__).resolve().parent.parent / "notebook" / "theme.css"
+    (out / "themes" / "notebook.css").unlink(missing_ok=True)
+    shutil.copyfile(theme, out / "themes" / "notebook.css")
+    index = out / "index.html"
+    html = index.read_text(encoding="utf-8")
+    anchor = '<link rel="stylesheet" href="/static/custom.css" crossorigin="use-credentials" />'
+    if html.count(anchor) != 1:
+        raise RuntimeError("Unsupported Open WebUI build: custom.css link not found in index.html.")
+    index.unlink()  # hard-linked to the installed frontend; do not write through it
+    index.write_text(
+        html.replace(anchor, anchor + '\n\t\t<link rel="stylesheet" href="/themes/notebook.css" />'),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

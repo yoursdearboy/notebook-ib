@@ -23,7 +23,7 @@ uv run bin/frontend .open-webui/frontend
 uv run bin/serve
 ```
 
-Open [Open WebUI](http://localhost:8000) and select the `notebook` model. Index documents as shown in [Use](#use) before asking a question; clicking a citation to a PDF opens it in the sidebar at the cited page. `bin/serve` runs Open WebUI, the RAG API (`/v1/models` and `/v1/chat/completions`), and the citation viewer as one app. It does not run migrations or build the frontend, and it exits if any of the required variables above is empty.
+Open [Open WebUI](http://localhost:8000) and use the Bioinformatics Institute model. Index documents as shown in [Use](#use) before asking a question; clicking a citation to a PDF opens it in the sidebar at the cited page. `bin/serve` runs Open WebUI, the RAG API (`/v1/models` and `/v1/chat/completions`), and the citation viewer as one app. It does not run migrations or build the frontend, and it exits if any of the required variables above is empty.
 
 The RAG schema lives in the default database, `rag` on `localhost:6024`. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts.
 
@@ -59,7 +59,7 @@ Leave `bin/serve` running and open a second terminal in the project directory. I
 uv run python -m notebook index ./documents
 ```
 
-In Open WebUI, ask the `notebook` model a question about the documents. To ask from the terminal instead, run:
+In Open WebUI, ask the Bioinformatics Institute model a question about the documents. To ask from the terminal instead, run:
 
 ```sh
 uv run python -m notebook ask "What color was the comet?"
@@ -116,17 +116,17 @@ location / {
 
 This also proxies `/citation-assets/*`, whose signatures the app checks, and the websocket. Setting `HOST=0.0.0.0` without nginx in front exposes `/v1`. nginx may serve the built frontend (`FRONTEND_BUILD_DIR`, produced by `bin/frontend`) as static files, but that is optional.
 
-Open WebUI stores its users, chats, and settings in `$DATA_DIR/webui.db`. The RAG index uses `RAG_DATABASE_URL` from `.env` (formerly `DATABASE_URL`; rename it in an existing `.env`, because a leftover `DATABASE_URL` is picked up by Open WebUI). Do not set `DATABASE_URL`: Open WebUI would use it instead of its own SQLite file. Open WebUI stores its embeddings in its own `document_chunk` table in the same PostgreSQL database (`PGVECTOR_DB_URL` in `.env`). The model appears as `notebook` and keeps the API ID `notebook-rag`. Each answer uses the last user message and includes references.
+Open WebUI stores its users, chats, and settings in `$DATA_DIR/webui.db`. The RAG index uses `RAG_DATABASE_URL` from `.env` (formerly `DATABASE_URL`; rename it in an existing `.env`, because a leftover `DATABASE_URL` is picked up by Open WebUI). Do not set `DATABASE_URL`: Open WebUI would use it instead of its own SQLite file. Open WebUI stores its embeddings in its own `document_chunk` table in the same PostgreSQL database (`PGVECTOR_DB_URL` in `.env`). The suggestions on the empty chat come from `prompt_suggestions.json` (set `NOTEBOOK_PROMPT_SUGGESTIONS` to its path, relative to the working directory; unset, Open WebUI keeps its own, and a missing file stops startup; a list of `title` pairs and `content`), applied at each start. The model appears as Bioinformatics Institute, with the Institute logo from `notebook/brand/` (served at `/static/favicon.png` and friends, which also replaces Open WebUI's own logo and name), and keeps the API ID `notebook-rag`. Each answer uses the last user message and includes references.
 
-The initial Open WebUI defaults are in `.env.example`; copy them into `.env`, since a `.env` made from an older example lacks them. `DEFAULT_MODELS=notebook-rag` selects the model. `USER_PERMISSIONS_CHAT_CONTROLS=false` hides the Chat Controls panel, and `USER_PERMISSIONS_CHAT_WEB_UPLOAD=false` disables Attach Webpage for regular users. Admins are exempt from those permissions. If Open WebUI already has saved settings, set the default model in the admin model settings and update **Chat Controls** and **Allow Web Upload** under **Admin Panel > Users > Groups > Default Permissions** and in any applicable group permissions.
+The initial Open WebUI defaults are in `.env.example`; copy them into `.env`, since a `.env` made from an older example lacks them. `DEFAULT_MODELS=notebook-rag` selects the model, the theme hides the model picker, and `ENABLE_EVALUATION_ARENA_MODELS=false` removes the Arena model. `USER_PERMISSIONS_CHAT_CONTROLS=false` hides the Chat Controls panel, and `USER_PERMISSIONS_CHAT_WEB_UPLOAD=false` disables Attach Webpage for regular users. Admins are exempt from those permissions. A model entry saved in **Admin Panel > Settings > Models** overrides the name from the API, so rename it there if it still shows `notebook-rag`. If Open WebUI already has saved settings, set the default model in the admin model settings and update **Chat Controls** and **Allow Web Upload** under **Admin Panel > Users > Groups > Default Permissions** and in any applicable group permissions.
 
 The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra requests that would each run a RAG query. Change these in the admin settings if Open WebUI has already saved their values.
 
 ### Frontend patch
 
-Open WebUI offers no setting to open a Sources-list entry in the sidebar viewer or to return the viewer to the cited page on a repeated click, so `bin/frontend OUT_DIR` copies its installed frontend and patches the compiled Citations chunk. Repeat the frontend build from [Setup](#setup) after upgrading Open WebUI. Use `FRONTEND_BUILD_DIR` as the output path if you changed it in `.env`. The build fails if the chunk no longer has the expected shape. If `FRONTEND_BUILD_DIR` does not exist, Open WebUI serves the API only and `/` returns 404.
+Open WebUI offers no setting to open a Sources-list entry in the sidebar viewer or to return the viewer to the cited page on a repeated click, so `bin/frontend OUT_DIR` copies its installed frontend and patches the compiled Citations chunk and hides the "Attach Webpage" entry of the + menu (admins are exempt from the web-upload permission, so no setting removes it). Repeat the frontend build from [Setup](#setup) after upgrading Open WebUI. Use `FRONTEND_BUILD_DIR` as the output path if you changed it in `.env`. The same build installs the [DESIGN.md](DESIGN.md) theme (`notebook/theme.css`: Open Sans for the interface, Noto Serif for answer text, slate text, deep-blue headings and buttons, light-gray surfaces, flat plus/minus disclosure rows) and links it from `index.html`; it applies to light mode only. The browser loads the fonts from `fonts.googleapis.com`. The build fails if the chunk no longer has the expected shape. If `FRONTEND_BUILD_DIR` does not exist, Open WebUI serves the API only and `/` returns 404.
 
-The browser loads PDF.js from `cdn.jsdelivr.net`. Signed asset links grant access to anyone who has the link, independently of Open WebUI login. Rotating the signing key invalidates old links.
+The browser loads PDF.js from `cdn.jsdelivr.net` and the PDF viewer's font from `fonts.googleapis.com`. Signed asset links grant access to anyone who has the link, independently of Open WebUI login. Rotating the signing key invalidates old links.
 
 ## Tests
 

@@ -5,11 +5,12 @@
 <title>PDF citation</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.624/web/pdf_viewer.css">
 <style>
-  body { margin: 0; font: 14px system-ui; color-scheme: light dark; }
-  #title { margin: 0; padding: 0.75rem 0.75rem 0; font-size: 1rem; font-weight: 600; }
+  @import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap");
+  body { margin: 0; font: 400 14px "Open Sans", system-ui, sans-serif; color: #3c3c50; background: #f5f5f5; }
+  #title { margin: 0; padding: 0.75rem 0.75rem 0; font-size: 1rem; font-weight: 600; color: #2d528a; }
   #status { margin: 0; padding: 0.75rem; }
   #pages { display: grid; gap: 0.5rem; padding: 0.5rem; overflow-anchor: none; }
-  .page { position: relative; display: grid; place-items: center; background: Canvas; }
+  .page { position: relative; display: grid; place-items: center; background: #fff; }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
   .textLayer { width: 100%; height: 100%; }
 </style>

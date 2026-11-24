@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Bioinformatics Institute">
+  <g fill="none" stroke="#3c3c50" stroke-width="5" stroke-linecap="round">
+    <path d="M 122 46 A 118 118 0 0 1 198 46"/>
+    <path d="M 274 122 A 118 118 0 0 1 274 198"/>
+    <path d="M 198 274 A 118 118 0 0 1 122 274"/>
+    <path d="M 46 198 A 118 118 0 0 1 46 122"/>
+  </g>
+  <g fill="#3a81e8">
+    <circle cx="76" cy="76" r="36"/><circle cx="244" cy="76" r="36"/>
+    <circle cx="76" cy="244" r="36"/><circle cx="244" cy="244" r="36"/>
+  </g>
+</svg>

@@ -14,7 +14,7 @@ def test_models_list_uses_friendly_name_and_preserves_api_id() -> None:
 
     assert response.status_code == 200
     assert response.json()["data"][0]["id"] == "notebook-rag"
-    assert response.json()["data"][0]["name"] == "notebook"
+    assert response.json()["data"][0]["name"] == "Bioinformatics Institute"
 
 
 def test_pdf_citation_embeds_the_full_document_at_the_cited_page(tmp_path, monkeypatch):

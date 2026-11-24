@@ -23,6 +23,7 @@ def make_webui(events: list[str] | None = None) -> FastAPI:
             events.append("shutdown")
 
     webui = FastAPI(lifespan=lifespan)
+    webui.state.config = types.SimpleNamespace()
 
     @webui.get("/")
     def index() -> str:
@@ -94,3 +95,24 @@ def test_lifespans_are_chained(monkeypatch, install_webui) -> None:
         assert events == ["startup"]
 
     assert events == ["startup", "shutdown"]
+
+
+def test_branding(install_webui, monkeypatch, tmp_path: Path) -> None:
+    install_webui()
+    file = tmp_path / "s.json"
+    file.write_text('[{"title": ["a", "b"], "content": "c"}]')
+    monkeypatch.setenv("NOTEBOOK_PROMPT_SUGGESTIONS", str(file))
+    app = create_app(Config())
+    client = TestClient(app)
+
+    logo = client.get("/static/favicon.png")
+    assert logo.status_code == 200
+    assert logo.headers["content-type"] == "image/png"
+    assert client.get("/static/favicon.svg").status_code == 200
+    avatar = client.get("/api/v1/models/model/profile/image?id=notebook-rag")
+    assert avatar.content == logo.content
+    webui = next(route.app for route in app.routes if getattr(route, "path", None) == "")
+    assert webui.state.WEBUI_NAME == "Bioinformatics Institute"
+    assert webui.state.config.DEFAULT_PROMPT_SUGGESTIONS == [
+        {"title": ["a", "b"], "content": "c"}
+    ]

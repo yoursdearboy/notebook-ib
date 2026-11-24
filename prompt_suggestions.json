@@ -1,0 +1,30 @@
+[
+  {
+    "title": [
+      "What is survival analysis",
+      "and when is it used?"
+    ],
+    "content": "What is survival analysis and when is it used?"
+  },
+  {
+    "title": [
+      "Explain the survival function",
+      "and how it is estimated"
+    ],
+    "content": "What is the survival function and how is it estimated?"
+  },
+  {
+    "title": [
+      "What is censoring",
+      "and why does it matter?"
+    ],
+    "content": "What is censoring in survival analysis and why does it matter?"
+  },
+  {
+    "title": [
+      "Compare Kaplan-Meier and Cox",
+      "which one should I use?"
+    ],
+    "content": "How do the Kaplan-Meier estimator and the Cox model differ, and when should each be used?"
+  }
+]

@@ -153,7 +153,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             "data": [
                 {
                     "id": MODEL_ID,
-                    "name": "notebook",
+                    "name": "Bioinformatics Institute",
                     "object": "model",
                     "created": 0,
                     "owned_by": "notebook",

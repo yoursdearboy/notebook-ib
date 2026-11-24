@@ -12,7 +12,7 @@ colors:
 typography:
   body:
     fontFamily: Open Sans
-    fontWeight: 300
+    fontWeight: 400
   accordion-label:
     fontFamily: Open Sans
     lineHeight: 1.35

@@ -1,0 +1,126 @@
+/* Open WebUI theme following DESIGN.md (Bioinformatics Institute).
+   Installed by bin/frontend. Light mode only; dark mode keeps Open WebUI's own. */
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&family=Noto+Serif:ital,wght@0,400;0,600;1,400&display=swap");
+
+:root:not(.dark) {
+  --nb-text-body: #3c3c50;
+  --nb-heading: #2d528a;
+  --nb-link: #3a81e8;
+  --nb-surface: #f5f5f5;
+  --nb-divider: #eeeeee;
+
+  --nb-font-body: "Noto Serif", Georgia, "Times New Roman", serif;
+  --font-sans: "Open Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Neutral scale: dark slate text, deep-blue emphasis, light-gray surfaces. */
+  --color-gray-50: #f5f5f5;
+  --color-gray-100: #eeeeee;
+  --color-gray-200: #e4e4e8;
+  --color-gray-300: #d2d2d8;
+  --color-gray-400: #a5a5b2;
+  --color-gray-500: #7b7b8c;
+  --color-gray-600: #5c5c70;
+  --color-gray-700: #3c3c50;
+  --color-gray-800: #3c3c50;
+  --color-gray-850: #2d528a;
+  --color-gray-900: #2d528a;
+  --color-gray-950: #213f6d;
+
+  --color-blue-400: #6ba2ee;
+  --color-blue-500: #3a81e8;
+  --color-blue-600: #3a81e8;
+  --color-blue-700: #2d528a;
+}
+
+html:not(.dark) body {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  color: var(--nb-text-body);
+  background: var(--nb-surface);
+}
+
+html:not(.dark) b,
+html:not(.dark) strong,
+html:not(.dark) button,
+html:not(.dark) summary { font-weight: 400; }
+
+html:not(.dark) h1,
+html:not(.dark) h2,
+html:not(.dark) h3,
+html:not(.dark) h4 {
+  color: var(--nb-heading);
+  font-weight: 600;
+}
+
+/* Reading text (answers, questions, Sources excerpts) uses a text serif;
+   Open Sans stays on interface elements. */
+html:not(.dark) .markdown-prose,
+html:not(.dark) .markdown-prose-xs,
+html:not(.dark) .prose,
+html:not(.dark) .chat-user,
+html:not(.dark) .chat-assistant {
+  font-family: var(--nb-font-body);
+  font-weight: 400;
+  line-height: 1.6;
+}
+html:not(.dark) .markdown-prose :is(h1, h2, h3, h4, th, button),
+html:not(.dark) .markdown-prose-xs :is(h1, h2, h3, h4, th, button),
+html:not(.dark) .prose :is(h1, h2, h3, h4, th, button) {
+  font-family: var(--font-sans);
+}
+html:not(.dark) :is(code, pre, kbd) { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* Inline links in answers. */
+html:not(.dark) .markdown-prose a,
+html:not(.dark) .markdown-prose-xs a,
+html:not(.dark) .prose a {
+  color: var(--nb-link);
+}
+
+/* Content sits on the light-gray surface; chat panes stay white cards. */
+html:not(.dark) #sidebar {
+  background: var(--nb-surface);
+  /* Sidebar text is slate like the rest of the copy; blue stays on the brand name. */
+  --color-gray-850: var(--nb-text-body);
+  --color-gray-900: var(--nb-text-body);
+  --color-gray-500: #6a6a7c;
+  font-weight: 400;
+  letter-spacing: 0.005em;
+}
+html:not(.dark) #sidebar-webui-name { color: var(--nb-heading); font-weight: 600; }
+
+/* Flat, divider-separated disclosure rows with a plus at the trailing edge. */
+html:not(.dark) details {
+  border-radius: 0;
+  border-bottom: 1px solid var(--nb-divider);
+}
+html:not(.dark) details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+}
+html:not(.dark) details > summary::-webkit-details-marker { display: none; }
+html:not(.dark) details > summary::after {
+  content: "+";
+  flex: none;
+  font-size: 1.25em;
+  line-height: 1;
+}
+html:not(.dark) details[open] > summary::after { content: "\2212"; }
+
+@media (max-width: 640px) {
+  html:not(.dark) h1 { font-size: 1.5rem; }
+  html:not(.dark) details > summary { overflow-wrap: anywhere; }
+}
+
+/* The notebook model is the only one: hide the model picker, "Add Model" and "Set as default". */
+.flex.w-full.max-w-fit:has(#model-selector-0-button),
+.flex.flex-col.w-full.items-start:has(#model-selector-0-button) + div { display: none; }
+
+/* Short name in the sidebar header; the page title keeps the full name. */
+#sidebar-webui-name { font-size: 0; }
+#sidebar-webui-name::after { content: "bioinf.me"; font-size: 14px; }
