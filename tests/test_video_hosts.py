@@ -37,6 +37,6 @@ def test_canonical_url():
 def test_embed_url_uses_t_and_whole_seconds():
     assert (
         kinescope_embed_url("https://kinescope.io/abc123", 125.9)
-        == "https://kinescope.io/embed/abc123?t=125"
+        == "https://kinescope.io/embed/abc123?t=125&autoplay=1"
     )
     assert kinescope_embed_url("https://youtu.be/x", 5) is None

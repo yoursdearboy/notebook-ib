@@ -143,7 +143,7 @@ def test_local_video_citation_embeds_the_video_viewer(tmp_path, monkeypatch):
         "source"
     ]
 
-    assert source["name"] == "lec.vtt (video 1:40)"
+    assert source["name"] == "Video"
     url = urlsplit(source["embed_url"])
     assert url.path == "/citation-assets/view-video"
     assert parse_qs(url.query)["t"] == ["100"]
@@ -191,5 +191,5 @@ def test_model_start_reaches_the_kinescope_embed_url(tmp_path):
         if line.startswith("data: {") and '"event"' in line
     ]
     assert events[0]["data"]["source"]["embed_url"] == (
-        "https://kinescope.io/embed/abc123?t=70"
+        "https://kinescope.io/embed/abc123?t=70&autoplay=1"
     )

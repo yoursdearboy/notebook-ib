@@ -36,9 +36,11 @@
     asset.searchParams.set("sig", url.searchParams.get("sig") ?? "");
     const start = Math.floor(Number(url.searchParams.get("t")));
     // A media fragment starts playback at that second; the video stays
-    // seekable from 0:00. It starts paused, since browsers block autoplay with sound.
+    // seekable from 0:00. Autoplay with sound is usually blocked, so on
+    // rejection the controls stay for a manual click.
     video.addEventListener("error", fail);
     video.src = Number.isFinite(start) && start > 0 ? `${asset.href}#t=${start}` : asset.href;
+    video.play().catch(() => {});
   } catch {
     fail();
   }

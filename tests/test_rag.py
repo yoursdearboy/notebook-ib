@@ -205,7 +205,7 @@ def test_model_start_overrides_the_chunk_start_for_that_citation_only(
     refs = build_references(documents, {1: 700.0})
 
     assert [r["start"] for r in refs] == [700.0, 900.0]
-    assert refs[0]["location"] == "video 12:40"
+    assert refs[0]["location"] == "video 11:40"
 
 
 def test_label_past_one_hour(tmp_path: Path) -> None:

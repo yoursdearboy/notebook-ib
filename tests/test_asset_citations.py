@@ -218,7 +218,7 @@ def test_video_embed_url_for_kinescope_needs_no_signing_settings(monkeypatch):
         video_file=None, video_url="https://kinescope.io/abc123", start=70.0
     )
 
-    assert url == "https://kinescope.io/embed/abc123?t=70"
+    assert url == "https://kinescope.io/embed/abc123?t=70&autoplay=1"
 
 
 def test_video_embed_url_is_none_when_the_file_is_missing_or_outside_the_root(

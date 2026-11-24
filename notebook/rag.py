@@ -246,7 +246,8 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
                 " Some evidence is a video transcript with numbered cues such as c41. For each video "
                 "evidence you cite, also give the cue where a student should start watching to have "
                 "the context needed to follow the cited passage: the cue of the passage itself or "
-                "an earlier one from its preceding transcript."
+                "an earlier one from its preceding transcript. Cue ids and bracketed timestamps are "
+                "internal markers: use them only in that field, never in the answer text."
             )
         prompt = [
             SystemMessage(content=system),
@@ -334,6 +335,7 @@ def build_references(
         start = document.metadata.get("start")
         if isinstance(start, int | float):
             start = float((starts or {}).get(index, start))
+            location = f"video {format_time(start)}"
         else:
             start = None
         excerpt = " ".join(document.page_content.split())

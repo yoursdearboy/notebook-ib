@@ -81,7 +81,11 @@ def _completion(completion_id: str, created: int, answer: str) -> dict[str, Any]
 def _source_event(reference: Reference) -> dict[str, Any]:
     """An Open WebUI citation event; one per chunk so [n] markers line up."""
     path = reference["path"]
-    title = reference["title"] or f"{Path(path).name} ({reference['location']})"
+    if reference["start"] is not None:
+        # Video headers carry no file name or time; the viewer opens at the time.
+        title = reference["title"] or "Video"
+    else:
+        title = reference["title"] or f"{Path(path).name} ({reference['location']})"
     source = {"id": f"{path}#{reference['index']}", "name": title}
     if reference["start"] is not None:
         embed_url = video_embed_url(

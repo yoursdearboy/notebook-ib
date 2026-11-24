@@ -34,4 +34,4 @@ def kinescope_embed_url(video_url: str, start: float) -> str | None:
         video_id = parse_kinescope_url(video_url)
     except ValueError:
         return None
-    return f"https://kinescope.io/embed/{video_id}?t={int(start)}"
+    return f"https://kinescope.io/embed/{video_id}?t={int(start)}&autoplay=1"
