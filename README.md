@@ -1,19 +1,47 @@
 # Local document RAG proof of concept
 
-This command-line tool indexes local text, Markdown, and PDFs into PostgreSQL with pgvector. It answers each question independently and prints references to the indexed source file and page or line range.
+Index local text, Markdown, and PDFs into PostgreSQL with pgvector, then ask questions about them in Open WebUI. Each answer uses the latest question and includes references to the source file and page or line range.
 
 ## Setup
 
-Copy the local development configuration and start PostgreSQL:
+Copy the local configuration:
 
 ```sh
 cp .env.example .env
-docker compose up -d --wait
-uv sync
-uv run bin/migrate
 ```
 
-The initialization command creates the RAG schema in the default database, `rag` on `localhost:6024`. Run it after starting PostgreSQL and before indexing or asking questions. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts. Model selection is configured in `.env` using LangChain `provider:model` identifiers:
+Run `openssl rand -hex 32` twice and set `WEBUI_SECRET_KEY` and `NOTEBOOK_ASSETS_LINK_SECRET` to the outputs in `.env`. `bin/serve` won't start without them. Keep both stable: changing `WEBUI_SECRET_KEY` invalidates Open WebUI sessions, and changing `NOTEBOOK_ASSETS_LINK_SECRET` invalidates existing PDF links.
+
+
+Install the app with Open WebUI, start PostgreSQL, initialize the RAG schema, build the frontend, and start the server:
+
+```sh
+uv sync --group webui
+docker compose up -d --wait
+uv run bin/migrate
+uv run bin/frontend .open-webui/frontend
+uv run bin/serve
+```
+
+Open [Open WebUI](http://localhost:8000) and select the `notebook` model. Index documents as shown in [Use](#use) before asking a question; clicking a citation to a PDF opens it in the sidebar at the cited page. `bin/serve` runs Open WebUI, the RAG API (`/v1/models` and `/v1/chat/completions`), and the citation viewer as one app. It does not run migrations or build the frontend, and it exits if any of the required variables above is empty.
+
+The RAG schema lives in the default database, `rag` on `localhost:6024`. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts.
+
+### PDF citations
+
+Clicking a numbered citation, or a Sources entry, that points to a PDF opens the document in Open WebUI's right sidebar at the cited page. This is part of the setup, and `bin/serve` exits if any of these variables in `.env` is empty:
+
+| Variable | Value |
+| --- | --- |
+| `NOTEBOOK_ASSETS_ROOT` | The folder holding the documents (`./documents` by default). Index files at their paths under it; the index records relative paths, so the folder can move without re-indexing. Sources outside it, and non-PDF sources, get no sidebar link. |
+| `NOTEBOOK_ASSETS_BASE_URL` | Public origin of the app, with no path: `http://localhost:8000` locally (match `HOST` and `PORT`), or e.g. `https://chat.example.com` behind nginx. |
+| `NOTEBOOK_ASSETS_LINK_SECRET` | The signing key generated above. |
+
+By default `bin/serve` serves the viewer and the signed PDFs itself. The links are built from `NOTEBOOK_ASSETS_BASE_URL`, so the assets may instead be served from S3 or a CDN.
+
+### Model configuration
+
+Set models in `.env` using LangChain `provider:model` identifiers:
 
 ```dotenv
 CHAT_MODEL=extractive:top-passage
@@ -25,10 +53,15 @@ The example configuration is built for lightweight local development. Embeddings
 
 ## Use
 
-Index one supported file or recursively scan a directory. Unsupported file types in a directory are skipped. A corrupt supported file is reported while other files continue to index; any file failure gives the command a nonzero exit status.
+Leave `bin/serve` running and open a second terminal in the project directory. Index one supported file or recursively scan a directory. Unsupported file types in a directory are skipped. A corrupt supported file is reported while other files continue to index; any file failure gives the command a nonzero exit status.
 
 ```sh
 uv run python -m notebook index ./documents
+```
+
+In Open WebUI, ask the `notebook` model a question about the documents. To ask from the terminal instead, run:
+
+```sh
 uv run python -m notebook ask "What color was the comet?"
 ```
 
@@ -60,21 +93,9 @@ Reindex a source after editing it. Each successful indexing operation replaces a
 
 PDF ingestion extracts embedded text with the `pypdf` loader; scanned PDFs without a text layer are not supported. Retrieval can return irrelevant passages, so the model is instructed to abstain when evidence is insufficient. Citation numbers are checked against retrieved chunks, and every retrieved chunk is shown in the reference list. These checks help trace an answer but cannot guarantee that each claim is supported by its citation.
 
-## Open WebUI
+## Open WebUI configuration
 
-`bin/serve` runs the RAG API (`/v1/models`, `/v1/chat/completions`, model id `notebook-rag`), the citation viewer and Open WebUI as one app, so Open WebUI can chat with the indexed documents. Start PostgreSQL, create the schema, and serve:
-
-```sh
-uv sync --group webui
-docker compose up -d --wait
-uv run bin/migrate
-uv run bin/frontend .open-webui/frontend
-uv run bin/serve
-```
-
-Open http://localhost:8000. `bin/serve` runs neither migrations nor the frontend build, so run `bin/migrate` and `bin/frontend` first (see below). It listens on `HOST` and `PORT`, keeps Open WebUI's data in `DATA_DIR`, and serves the frontend from `FRONTEND_BUILD_DIR`; all of these are set in `.env` (see `.env.example`, and keep the port in `OPENAI_API_BASE_URL` equal to `PORT`). On a VM you also need PostgreSQL with pgvector, `ffmpeg`, and `libmagic1`.
-
-`bin/serve` exits if `WEBUI_SECRET_KEY` is unset or empty; generate one with `openssl rand -hex 32` and put it in `.env`. Keep it stable: changing it invalidates Open WebUI sessions.
+`bin/serve` listens on `HOST` and `PORT`, keeps Open WebUI's data in `DATA_DIR`, and serves the frontend from `FRONTEND_BUILD_DIR`. See `.env.example` for the defaults. If you change `PORT`, update `OPENAI_API_BASE_URL` to use the same port. On a VM you also need PostgreSQL with pgvector, `ffmpeg`, and `libmagic1`.
 
 The RAG API (`/v1/*`) has no authentication of its own: Open WebUI calls it over loopback, and the app listens on `127.0.0.1` by default. In production put nginx in front as the only public listener, and do not expose `/v1/`:
 
@@ -101,36 +122,11 @@ The initial Open WebUI defaults are in `.env.example`; copy them into `.env`, si
 
 The `ENABLE_*_GENERATION=false` settings stop Open WebUI from sending extra requests that would each run a RAG query. Change these in the admin settings if Open WebUI has already saved their values.
 
-### Open PDF citations in the sidebar
+### Frontend patch
 
-`bin/serve` serves the citation viewer and signed PDFs itself.
-The RAG API only generates links.
+Open WebUI offers no setting to open a Sources-list entry in the sidebar viewer or to return the viewer to the cited page on a repeated click, so `bin/frontend OUT_DIR` copies its installed frontend and patches the compiled Citations chunk. Repeat the frontend build from [Setup](#setup) after upgrading Open WebUI. Use `FRONTEND_BUILD_DIR` as the output path if you changed it in `.env`. The build fails if the chunk no longer has the expected shape. If `FRONTEND_BUILD_DIR` does not exist, Open WebUI serves the API only and `/` returns 404.
 
-| Variable | Value |
-| --- | --- |
-| `NOTEBOOK_ASSETS_ROOT` | The folder holding the documents. Index the files at their paths under this folder. The index records paths relative to it, so the folder can move without re-indexing. |
-| `NOTEBOOK_ASSETS_BASE_URL` | Public origin for Open WebUI, e.g. `https://chat.example.com` (no path), or `http://localhost:8000` locally. |
-| `NOTEBOOK_ASSETS_LINK_SECRET` | A random signing key, generated with `openssl rand -hex 32`. Keep it private and stable across restarts. |
-
-Put the settings in `.env` and restart `bin/serve`.
-
-Ask a new question that cites a PDF, then click a numbered citation in the
-answer (for example, `[1]`). Open WebUI's right sidebar opens the full document
-at the cited page. The **Sources** list still shows text excerpts. Existing
-answers retain their original links.
-
-Entries in the **Sources** list open the same viewer, and clicking a citation
-again returns the viewer to the cited page. Open WebUI offers no setting for
-this, so `bin/frontend OUT_DIR` copies its installed frontend and patches the
-compiled Citations chunk. Run `uv run bin/frontend .open-webui/frontend` (the
-path in `FRONTEND_BUILD_DIR`) before `bin/serve`, and again after upgrading
-Open WebUI. It fails if the chunk no longer has the expected shape. If
-`FRONTEND_BUILD_DIR` does not exist, Open WebUI serves the API only and `/`
-returns 404.
-
-The browser loads PDF.js from `cdn.jsdelivr.net`. Signed asset links grant access
-to anyone who has the link, independently of Open WebUI login. Rotating the
-signing key invalidates old links.
+The browser loads PDF.js from `cdn.jsdelivr.net`. Signed asset links grant access to anyone who has the link, independently of Open WebUI login. Rotating the signing key invalidates old links.
 
 ## Tests
 

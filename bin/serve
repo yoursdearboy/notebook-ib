@@ -15,8 +15,21 @@ def main() -> None:
     import uvicorn
 
     load_dotenv()
-    if not os.environ.get("WEBUI_SECRET_KEY"):
-        sys.exit("WEBUI_SECRET_KEY must be set (for example: openssl rand -hex 32).")
+    missing = [
+        name
+        for name in (
+            "WEBUI_SECRET_KEY",
+            "NOTEBOOK_ASSETS_ROOT",
+            "NOTEBOOK_ASSETS_BASE_URL",
+            "NOTEBOOK_ASSETS_LINK_SECRET",
+        )
+        if not os.environ.get(name)
+    ]
+    if missing:
+        sys.exit(
+            f"Set {', '.join(missing)} in .env (see .env.example). "
+            "Secrets: openssl rand -hex 32."
+        )
     uvicorn.run(
         "notebook.app:create_app",
         factory=True,
