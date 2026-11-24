@@ -20,16 +20,11 @@ class Config:
     chunk_size: int = 1000
     chunk_overlap: int = 200
     retrieval_k: int = 4
-    pdf_loader: str = "pypdf"
-    pdf_ocr_languages: tuple[str, ...] = ("eng",)
 
     @classmethod
     def from_env(
         cls,
         environ: Mapping[str, str] | None = None,
-        *,
-        pdf_loader: str = "pypdf",
-        pdf_ocr_languages: str = "eng",
     ) -> Config:
         if environ is None:
             load_dotenv(override=False)
@@ -58,12 +53,6 @@ class Config:
                 chunk_size=int(values.get("CHUNK_SIZE", "1000")),
                 chunk_overlap=int(values.get("CHUNK_OVERLAP", "200")),
                 retrieval_k=int(values.get("RETRIEVAL_K", "4")),
-                pdf_loader=pdf_loader.strip().lower(),
-                pdf_ocr_languages=tuple(
-                    language.strip()
-                    for language in pdf_ocr_languages.split(",")
-                    if language.strip()
-                ),
             )
         except (TypeError, ValueError) as exc:
             raise ValueError(
@@ -80,10 +69,4 @@ class Config:
             )
         if configured.retrieval_k <= 0:
             raise ValueError("RETRIEVAL_K must be positive.")
-        if configured.pdf_loader not in {"pypdf", "unstructured"}:
-            raise ValueError("--pdf-loader must be either 'pypdf' or 'unstructured'.")
-        if not configured.pdf_ocr_languages:
-            raise ValueError(
-                "--pdf-ocr-languages must contain at least one language code."
-            )
         return configured

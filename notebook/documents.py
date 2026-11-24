@@ -91,49 +91,8 @@ def _split_signature(config: Config, *, pdf: bool = False) -> str:
         "version": 1,
     }
     if pdf:
-        data["pdf_loader"] = config.pdf_loader
-        data["pdf_ocr_languages"] = config.pdf_ocr_languages
+        data["pdf_loader"] = "pypdf"
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
-
-
-def _load_pdf_pages(source: Path, config: Config) -> list[Document]:
-    if config.pdf_loader == "pypdf":
-        return PyPDFLoader(str(source)).load()
-
-    try:
-        from langchain_community.document_loaders import UnstructuredPDFLoader
-
-        elements = UnstructuredPDFLoader(
-            str(source),
-            mode="elements",
-            strategy="auto",
-            languages=list(config.pdf_ocr_languages),
-        ).load()
-    except ImportError as exc:
-        raise RuntimeError(
-            "--pdf-loader unstructured requires the optional PDF OCR dependencies. "
-            "Install them with 'uv sync --extra pdf-ocr'."
-        ) from exc
-    pages: dict[int, list[str]] = {}
-    for element in elements:
-        if not element.page_content.strip():
-            continue
-        try:
-            page = int(element.metadata["page_number"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(
-                f"PDF loader '{config.pdf_loader}' did not provide page numbers for {source}."
-            ) from exc
-        if page < 1:
-            raise ValueError(
-                f"PDF loader '{config.pdf_loader}' returned an invalid page for {source}."
-            )
-        pages.setdefault(page, []).append(element.page_content)
-
-    return [
-        Document(page_content="\n\n".join(texts), metadata={"page": page - 1})
-        for page, texts in sorted(pages.items())
-    ]
 
 
 def stored_source(source: Path) -> str:
@@ -232,7 +191,7 @@ def prepare_chunks(
     source_hash = hashlib.sha256(raw).hexdigest()
     signature = _split_signature(config, pdf=source.suffix.lower() == ".pdf")
     if source.suffix.lower() == ".pdf":
-        pages = _load_pdf_pages(source, config)
+        pages = PyPDFLoader(str(source)).load()
         chunks = []
         for page_document in pages:
             page_text = page_document.page_content

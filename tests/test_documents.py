@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import builtins
 from pathlib import Path
 
 import pytest
@@ -235,23 +234,6 @@ def test_config_repr_does_not_include_secret() -> None:
         RAG_DATABASE_URL="postgresql+psycopg://rag:db-secret@localhost:6024/rag",
     )
     assert "db-secret" not in repr(configured)
-
-
-def test_unstructured_loader_missing_dependency_raises_runtime_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    pdf = tmp_path / "sample.pdf"
-    make_text_pdf(pdf, ["sample content"])
-    real_import = builtins.__import__
-
-    def fake_import(name: str, *args: object, **kwargs: object):
-        if name == "langchain_community.document_loaders":
-            raise ImportError("No module named 'unstructured'")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(RuntimeError, match="uv sync --extra pdf-ocr"):
-        prepare_chunks(pdf, Config.from_env({}, pdf_loader="unstructured"))
 
 
 def test_dotenv_values_do_not_override_environment(

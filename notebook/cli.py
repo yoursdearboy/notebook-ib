@@ -79,17 +79,6 @@ def _create_parser() -> argparse.ArgumentParser:
         "--title",
         help="Display title for the document, shown in references (single file only)",
     )
-    index_parser.add_argument(
-        "--pdf-loader",
-        choices=("pypdf", "unstructured"),
-        default="pypdf",
-        help="PDF extraction backend (default: pypdf)",
-    )
-    index_parser.add_argument(
-        "--pdf-ocr-languages",
-        default="eng",
-        help="Comma-separated language codes for Unstructured OCR (default: eng)",
-    )
     ask_parser = commands.add_parser(
         "ask", help="Ask a question about indexed documents"
     )
@@ -103,10 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
     try:
-        config = Config.from_env(
-            pdf_loader=getattr(args, "pdf_loader", "pypdf"),
-            pdf_ocr_languages=getattr(args, "pdf_ocr_languages", "eng"),
-        )
+        config = Config.from_env()
     except ValueError as exc:
         logger.error("%s", exc)
         return 1

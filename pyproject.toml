@@ -30,9 +30,6 @@ dependencies = [
     "torch>=2.14",
 ]
 
-[project.optional-dependencies]
-pdf-ocr = ["unstructured[pdf]>=0.18.0"]
-
 [project.scripts]
 notebook = "notebook.cli:main"
 

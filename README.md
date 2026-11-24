@@ -58,17 +58,7 @@ Retrieved references:
 
 Reindex a source after editing it. Each successful indexing operation replaces all stored chunks for that source, including chunks from an older, longer version. Files removed from a directory are not automatically removed from the index. PostgreSQL stores the index across runs.
 
-PDF ingestion uses the LangChain loader selected with `--pdf-loader`. The default `pypdf` loader extracts embedded text. To process scanned PDFs, install the optional dependencies and select the OCR-capable Unstructured loader:
-
-```sh
-uv sync --extra pdf-ocr
-```
-
-```sh
-uv run python -m notebook index ./documents --pdf-loader unstructured --pdf-ocr-languages eng
-```
-
-Unstructured's automatic strategy extracts embedded PDF text when available and uses Tesseract OCR for scanned pages. Tesseract and Poppler must be installed on the system, along with the language data named by `--pdf-ocr-languages` (comma-separated codes such as `eng` or `eng,rus`). The loader setting is isolated to PDF ingestion, so another LangChain PDF loader can be added or selected without changing chunking and storage. Retrieval can return irrelevant passages, so the model is instructed to abstain when evidence is insufficient. Citation numbers are checked against retrieved chunks, and every retrieved chunk is shown in the reference list. These checks help trace an answer but cannot guarantee that each claim is supported by its citation.
+PDF ingestion extracts embedded text with the `pypdf` loader; scanned PDFs without a text layer are not supported. Retrieval can return irrelevant passages, so the model is instructed to abstain when evidence is insufficient. Citation numbers are checked against retrieved chunks, and every retrieved chunk is shown in the reference list. These checks help trace an answer but cannot guarantee that each claim is supported by its citation.
 
 ## Open WebUI
 
