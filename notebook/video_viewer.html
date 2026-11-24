@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video citation</title>
+<style>
+  body { margin: 0; font: 14px system-ui; color-scheme: light dark; }
+  #title { margin: 0; padding: 0.75rem 0.75rem 0; font-size: 1rem; font-weight: 600; }
+  #status { margin: 0; padding: 0.75rem; }
+  video { display: block; width: 100%; max-height: 100vh; margin-top: 0.75rem; background: #000; }
+</style>
+<h1 id="title" hidden></h1>
+<p id="status" role="status" hidden></p>
+<video id="video" controls preload="metadata" playsinline></video>
+<script type="module">
+  const status = document.getElementById("status");
+  const video = document.getElementById("video");
+  const url = new URL(location.href);
+  const title = (url.searchParams.get("title") || "").trim().slice(0, 300);
+  if (title) {
+    const heading = document.getElementById("title");
+    heading.textContent = title;
+    heading.hidden = false;
+    document.title = title;
+  }
+  const fail = () => {
+    status.hidden = false;
+    status.textContent = "Could not load the video. The citation excerpt is available in the chat’s Sources list.";
+  };
+
+  try {
+    const asset = new URL(url.searchParams.get("asset") ?? "", url.origin);
+    if (asset.origin !== url.origin || !asset.pathname.startsWith("/citation-assets/files/")) {
+      throw new Error("Invalid citation asset");
+    }
+    asset.searchParams.set("sig", url.searchParams.get("sig") ?? "");
+    const start = Math.floor(Number(url.searchParams.get("t")));
+    // A media fragment starts playback at that second; the video stays
+    // seekable from 0:00. It starts paused, since browsers block autoplay with sound.
+    video.addEventListener("error", fail);
+    video.src = Number.isFinite(start) && start > 0 ? `${asset.href}#t=${start}` : asset.href;
+  } catch {
+    fail();
+  }
+</script>

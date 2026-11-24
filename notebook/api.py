@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
-from notebook.asset_citations import asset_embed_url
+from notebook.asset_citations import asset_embed_url, video_embed_url
 from notebook.config import Config
 from notebook.models import init_chat_model
 from notebook.rag import IndexStore, Reference, build_graph, build_references
@@ -83,7 +83,16 @@ def _source_event(reference: Reference) -> dict[str, Any]:
     path = reference["path"]
     title = reference["title"] or f"{Path(path).name} ({reference['location']})"
     source = {"id": f"{path}#{reference['index']}", "name": title}
-    if embed_url := asset_embed_url(path, reference["location"], reference["title"]):
+    if reference["start"] is not None:
+        embed_url = video_embed_url(
+            video_file=reference["video_file"],
+            video_url=reference["video_url"],
+            start=reference["start"],
+            title=reference["title"],
+        )
+    else:
+        embed_url = asset_embed_url(path, reference["location"], reference["title"])
+    if embed_url:
         source["embed_url"] = embed_url
     return {
         "type": "source",
