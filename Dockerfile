@@ -30,7 +30,7 @@ COPY --from=build /opt/python /opt/python
 COPY --from=build --chown=app:app /app/.venv /app/.venv
 COPY --chmod=755 entrypoint.sh /usr/local/bin/notebook-entrypoint.sh
 COPY --chown=app:app notebook /app/notebook
-COPY deploy/nginx.conf deploy/assets.js deploy/asset-viewer.html /etc/nginx/
+COPY nginx.conf deploy/assets.js deploy/asset-viewer.html /etc/nginx/
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/home/app/.cache/huggingface \
