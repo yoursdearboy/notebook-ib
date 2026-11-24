@@ -6,11 +6,11 @@ import re
 from pathlib import Path
 from typing import ClassVar
 
-from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 
 from notebook.config import Config
 from notebook.documents import index_path
+from notebook.models import init_chat_model
 from notebook.rag import IndexStore, RagState, build_graph, build_references
 
 __all__ = ["main"]

@@ -4,11 +4,10 @@ This command-line tool indexes local text, Markdown, and PDFs into PostgreSQL wi
 
 ## Setup
 
-Copy the example configuration, set credentials for your chosen providers, and start PostgreSQL:
+Copy the local development configuration and start PostgreSQL:
 
 ```sh
 cp .env.example .env
-# Set provider credentials in .env (e.g. GOOGLE_API_KEY for Google models)
 docker compose up -d --wait
 uv sync
 uv run python -m notebook.migration
@@ -17,12 +16,12 @@ uv run python -m notebook.migration
 The initialization command creates the RAG schema in the default database, `rag` on `localhost:6024`. Run it after starting PostgreSQL and before indexing or asking questions. PostgreSQL data lives in the named `rag_pgdata` volume and survives container restarts. Model selection is configured in `.env` using LangChain `provider:model` identifiers:
 
 ```dotenv
-CHAT_MODEL=google_genai:gemini-3.7-flash
-EMBEDDING_MODEL=huggingface:BAAI/bge-m3
-EMBEDDING_DIMENSION=1024
+CHAT_MODEL=extractive:top-passage
+EMBEDDING_MODEL=huggingface:sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_DIMENSION=384
 ```
 
-Any LangChain `provider:model` identifier can be configured for chat and embeddings along with that provider's standard API key environment variable (such as `GOOGLE_API_KEY` for `google_genai` or `OPENAI_API_KEY` for `openai`). Embeddings default to the local Hugging Face model `BAAI/bge-m3`; its weights are downloaded on first use. Changing the embedding model or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
+The example configuration is built for lightweight local development. Embeddings use the small `all-MiniLM-L6-v2` model (about 90 MB, downloaded on first use, no API key), so retrieval is real semantic search. The `extractive:top-passage` chat backend runs no LLM: it answers with the top retrieved passage and its citation, so the output shows what retrieval returned. For generated answers, set a LangChain `provider:model` chat identifier and its credentials, and optionally a stronger embedding model such as `huggingface:BAAI/bge-m3` with `EMBEDDING_DIMENSION=1024`. Changing the embedding model or dimension requires a fresh index because vectors from different embedding spaces cannot be mixed.
 
 ## Use
 
