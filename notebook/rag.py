@@ -5,7 +5,6 @@ import json
 import math
 import re
 import uuid
-from pathlib import Path
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -262,7 +261,7 @@ def build_references(documents: list[Document]) -> list[Reference]:
         source = document.metadata.get("source")
         if not isinstance(source, str) or not source:
             raise ValueError("A retrieved document is missing its source path metadata.")
-        path = str(Path(source).expanduser().resolve())
+        path = source
         if isinstance(document.metadata.get("page"), int):
             location = f"page {document.metadata['page']}"
         elif isinstance(document.metadata.get("line_start"), int) and isinstance(

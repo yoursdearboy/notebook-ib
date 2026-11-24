@@ -112,7 +112,7 @@ The RAG API only generates links.
 
 | Variable | Value |
 | --- | --- |
-| `NOTEBOOK_ASSETS_ROOT` | The folder holding the documents. Index the files at their paths under this folder. |
+| `NOTEBOOK_ASSETS_ROOT` | The folder holding the documents. Index the files at their paths under this folder. The index records paths relative to it, so the folder can move without re-indexing. |
 | `NOTEBOOK_ASSETS_BASE_URL` | Public origin for Open WebUI, e.g. `https://chat.example.com` (no path), or `http://localhost:8000` locally. |
 | `NOTEBOOK_ASSETS_LINK_SECRET` | A random signing key, generated with `openssl rand -hex 32`. Keep it private and stable across restarts. |
 

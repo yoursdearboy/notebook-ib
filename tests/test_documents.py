@@ -263,3 +263,21 @@ def test_dotenv_values_do_not_override_environment(
     monkeypatch.setenv("CHUNK_OVERLAP", "0")
 
     assert Config.from_env().chunk_size == 120
+
+
+def test_source_is_stored_relative_to_assets_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
+    (tmp_path / "sub").mkdir()
+    source = tmp_path / "sub" / "notes.md"
+    source.write_text("some content\n", encoding="utf-8")
+
+    chunks = prepare_chunks(source, config())
+
+    assert all(chunk.metadata["source"] == "sub/notes.md" for chunk in chunks)
+
+    # Chunk ids do not depend on where the root lives.
+    moved = tmp_path.parent / (tmp_path.name + "-moved")
+    tmp_path.rename(moved)
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(moved))
+    again = prepare_chunks(moved / "sub" / "notes.md", config())
+    assert [c.id for c in again] == [c.id for c in chunks]

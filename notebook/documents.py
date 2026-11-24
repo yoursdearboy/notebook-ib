@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 
@@ -130,6 +131,21 @@ def _load_pdf_pages(source: Path, config: Config) -> list[Document]:
     ]
 
 
+def stored_source(source: Path) -> str:
+    """The source as recorded in the index.
+
+    Relative to NOTEBOOK_ASSETS_ROOT when the file is under it, so the index
+    survives the root moving; absolute otherwise.
+    """
+    root = os.getenv("NOTEBOOK_ASSETS_ROOT")
+    if root:
+        try:
+            return source.relative_to(Path(root).expanduser().resolve()).as_posix()
+        except ValueError:
+            pass
+    return str(source)
+
+
 def _split_text(
     text: str,
     *,
@@ -149,6 +165,7 @@ def _split_text(
     pieces = splitter.create_documents([text])
     chunks: list[Document] = []
     namespace = uuid.NAMESPACE_URL
+    stored = stored_source(source)
     previous_start = -1
     previous_end = 0
     for piece in pieces:
@@ -167,9 +184,9 @@ def _split_text(
         previous_end = start + len(piece.page_content)
         ordinal = ordinal_start + len(chunks)
         end = start + len(piece.page_content)
-        identity = f"{source}\0{source_hash}\0{signature}\0{ordinal}"
+        identity = f"{stored}\0{source_hash}\0{signature}\0{ordinal}"
         metadata: dict[str, object] = {
-            "source": str(source),
+            "source": stored,
             "source_hash": source_hash,
             "split_signature": signature,
             "chunk_index": ordinal,

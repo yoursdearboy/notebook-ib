@@ -79,3 +79,21 @@ def test_pdf_outside_configured_folder_remains_a_text_citation(tmp_path, monkeyp
         citation = _source_event(reference)["data"]
         assert "embed_url" not in citation["source"]
         assert citation["document"] == ["Evidence"]
+
+
+def test_relative_source_is_resolved_against_assets_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
+    monkeypatch.setenv("NOTEBOOK_ASSETS_BASE_URL", "https://chat.example.com")
+    monkeypatch.setenv("NOTEBOOK_ASSETS_LINK_SECRET", "test-only")
+    (tmp_path / "sub").mkdir()
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=400)
+    writer.write(tmp_path / "sub" / "doc.pdf")
+    reference = build_references(
+        [Document(page_content="Evidence", metadata={"source": "sub/doc.pdf", "page": 1})]
+    )[0]
+
+    assert reference["path"] == "sub/doc.pdf"
+    source = _source_event(reference)["data"]["source"]
+    args = parse_qs(urlsplit(source["embed_url"]).query)
+    assert args["asset"] == ["/citation-assets/files/sub/doc.pdf"]
