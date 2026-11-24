@@ -12,6 +12,7 @@ from notebook.config import Config
 from notebook.rag import (
     IndexStore,
     build_graph,
+    build_references,
 )
 
 
@@ -149,3 +150,77 @@ def test_search_without_embeddings_raises_runtime_error(
 
     with pytest.raises(RuntimeError, match="Embeddings"):
         store.search("q", 1)
+
+
+def video_doc(source: Path, start: float, **metadata: object) -> Document:
+    return doc(
+        source,
+        "cued evidence",
+        start=start,
+        end=start + 30,
+        cue_start=3,
+        cue_end=4,
+        video_file="lec.mp4",
+        **metadata,
+    )
+
+
+def test_video_reference_has_label_start_and_video_fields(tmp_path: Path) -> None:
+    refs = build_references([video_doc(tmp_path / "lec.vtt", 760.0)])
+
+    assert refs[0]["location"] == "video 12:40"
+    assert (refs[0]["start"], refs[0]["video_file"], refs[0]["video_url"]) == (
+        760.0,
+        "lec.mp4",
+        None,
+    )
+
+
+def test_video_reference_with_a_url_has_no_video_file(tmp_path: Path) -> None:
+    document = doc(
+        tmp_path / "lec.vtt",
+        "x",
+        start=1.0,
+        video_url="https://kinescope.io/abc",
+    )
+
+    ref = build_references([document])[0]
+
+    assert (ref["video_file"], ref["video_url"]) == (None, "https://kinescope.io/abc")
+
+
+def test_model_start_overrides_the_chunk_start_for_that_citation_only(
+    tmp_path: Path,
+) -> None:
+    documents = [
+        video_doc(tmp_path / "a.vtt", 760.0),
+        video_doc(tmp_path / "b.vtt", 900.0),
+    ]
+
+    refs = build_references(documents, {1: 700.0})
+
+    assert [r["start"] for r in refs] == [700.0, 900.0]
+    assert refs[0]["location"] == "video 12:40"
+
+
+def test_label_past_one_hour(tmp_path: Path) -> None:
+    refs = build_references([video_doc(tmp_path / "a.vtt", 3760.0)])
+
+    assert refs[0]["location"] == "video 1:02:40"
+
+
+def test_pdf_reference_has_no_video_fields(tmp_path: Path) -> None:
+    ref = build_references([doc(tmp_path / "a.pdf", "text", page=2)])[0]
+
+    assert (ref["start"], ref["video_file"], ref["video_url"]) == (None, None, None)
+
+
+def test_video_chunk_location_appears_in_the_prompt(tmp_path: Path) -> None:
+    model = FakeModel("Answer [1]")
+    graph = build_graph(
+        FakeStore([video_doc(tmp_path / "a.vtt", 760.0)], []), model, k=1
+    )
+
+    graph.invoke({"question": "Q?"})
+
+    assert "(video 12:40)" in model.prompts[0][1].content

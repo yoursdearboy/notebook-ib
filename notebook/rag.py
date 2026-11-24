@@ -5,6 +5,7 @@ import json
 import math
 import re
 import uuid
+from collections.abc import Mapping
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -19,6 +20,7 @@ from sqlalchemy import text as sql_text
 from typing_extensions import TypedDict
 
 from notebook.config import Config
+from notebook.transcripts import format_time
 
 __all__ = [
     "IndexStore",
@@ -182,6 +184,19 @@ class IndexStore:
             pass
 
 
+def location_label(metadata: Mapping[str, object]) -> str | None:
+    """`page N`, `lines A-B` or `video 12:40`; None if the chunk has no location."""
+    if isinstance(metadata.get("page"), int):
+        return f"page {metadata['page']}"
+    if isinstance(metadata.get("line_start"), int) and isinstance(
+        metadata.get("line_end"), int
+    ):
+        return f"lines {metadata['line_start']}-{metadata['line_end']}"
+    if isinstance(metadata.get("start"), int | float):
+        return f"video {format_time(metadata['start'])}"
+    return None
+
+
 class RagState(TypedDict, total=False):
     question: str
     documents: list[Document]
@@ -205,15 +220,7 @@ def build_graph(store: IndexStore, model: BaseChatModel, k: int) -> CompiledStat
         context_parts = []
         for index, document in enumerate(documents, start=1):
             metadata = document.metadata
-            location = (
-                f"page {metadata['page']}"
-                if "page" in metadata
-                else (
-                    f"lines {metadata['line_start']}-{metadata['line_end']}"
-                    if "line_start" in metadata and "line_end" in metadata
-                    else "location unavailable"
-                )
-            )
+            location = location_label(metadata) or "location unavailable"
             label = metadata.get("title") or metadata.get("source", "unknown source")
             context_parts.append(
                 f"[{index}] Source: {label} ({location})\n"
@@ -255,9 +262,18 @@ class Reference(TypedDict):
     location: str
     excerpt: str
     content: str
+    start: float | None
+    video_file: str | None
+    video_url: str | None
 
 
-def build_references(documents: list[Document]) -> list[Reference]:
+def _text_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def build_references(
+    documents: list[Document], starts: Mapping[int, float] | None = None
+) -> list[Reference]:
     references: list[Reference] = []
     for index, document in enumerate(documents, start=1):
         source = document.metadata.get("source")
@@ -267,16 +283,16 @@ def build_references(documents: list[Document]) -> list[Reference]:
         title = document.metadata.get("title")
         if not isinstance(title, str) or not title.strip():
             title = None
-        if isinstance(document.metadata.get("page"), int):
-            location = f"page {document.metadata['page']}"
-        elif isinstance(document.metadata.get("line_start"), int) and isinstance(
-            document.metadata.get("line_end"), int
-        ):
-            location = f"lines {document.metadata['line_start']}-{document.metadata['line_end']}"
-        else:
+        location = location_label(document.metadata)
+        if location is None:
             raise ValueError(
-                "A retrieved document is missing its page or line location metadata."
+                "A retrieved document is missing its page, line or time location metadata."
             )
+        start = document.metadata.get("start")
+        if isinstance(start, int | float):
+            start = float((starts or {}).get(index, start))
+        else:
+            start = None
         excerpt = " ".join(document.page_content.split())
         if len(excerpt) > 240:
             excerpt = excerpt[:237].rstrip() + "..."
@@ -288,6 +304,9 @@ def build_references(documents: list[Document]) -> list[Reference]:
                 location=location,
                 excerpt=excerpt,
                 content=document.page_content,
+                start=start,
+                video_file=_text_or_none(document.metadata.get("video_file")),
+                video_url=_text_or_none(document.metadata.get("video_url")),
             )
         )
     return references
