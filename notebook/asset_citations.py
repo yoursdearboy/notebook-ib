@@ -9,21 +9,35 @@ from urllib.parse import quote, urlencode, urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-__all__ = ["ASSET_ROUTE", "asset_embed_url", "router", "signature_valid"]
+from notebook.video_hosts import kinescope_embed_url
+
+__all__ = [
+    "ASSET_ROUTE",
+    "asset_embed_url",
+    "router",
+    "signature_valid",
+    "video_embed_url",
+]
 
 ASSET_ROUTE = "/citation-assets"
 router = APIRouter()
 
-_VIEWER = Path(__file__).with_name("asset_viewer.html")
+_PDF_VIEWER = Path(__file__).with_name("asset_viewer.html")
+_VIDEO_VIEWER = Path(__file__).with_name("video_viewer.html")
+_MEDIA_TYPES = {".pdf": "application/pdf", ".mp4": "video/mp4", ".webm": "video/webm"}
+_PDF = frozenset({".pdf"})
+_VIDEO = frozenset({".mp4", ".webm"})
 _SIGNATURE = re.compile(r"[0-9a-f]{64}")
 
 
-def _asset_path(root: Path, file: str) -> Path | None:
+def _asset_path(
+    root: Path, file: str, suffixes: frozenset[str] = frozenset(_MEDIA_TYPES)
+) -> Path | None:
     try:
         path = (root / file).resolve()
         if (
             path.is_relative_to(root)
-            and path.suffix.lower() == ".pdf"
+            and path.suffix.lower() in suffixes
             and path.is_file()
         ):
             return path
@@ -32,14 +46,12 @@ def _asset_path(root: Path, file: str) -> Path | None:
     return None
 
 
-def asset_embed_url(
-    source: str, location: str, title: str | None = None
-) -> str | None:
+def _signed_link(source: str, suffixes: frozenset[str]) -> tuple[str, str, str] | None:
+    """(base URL, asset URI, signature) for a file under the assets root."""
     root_dir = os.getenv("NOTEBOOK_ASSETS_ROOT")
     base_url = os.getenv("NOTEBOOK_ASSETS_BASE_URL", "").rstrip("/")
     secret = os.getenv("NOTEBOOK_ASSETS_LINK_SECRET")
-    page = re.fullmatch(r"page ([1-9][0-9]*)", location)
-    if not (root_dir and base_url and secret and page):
+    if not (root_dir and base_url and secret):
         return None
     try:
         base = urlsplit(base_url)
@@ -55,17 +67,48 @@ def asset_embed_url(
     ):
         return None
     root = Path(root_dir).expanduser().resolve()
-    path = _asset_path(root, source)
+    path = _asset_path(root, source, suffixes)
     if path is None:
         return None
     uri = f"{ASSET_ROUTE}/files/{path.relative_to(root).as_posix()}"
     signature = hmac.digest(secret.encode(), uri.encode(), "sha256").hex()
+    return base_url, uri, signature
+
+
+def asset_embed_url(
+    source: str, location: str, title: str | None = None
+) -> str | None:
+    page = re.fullmatch(r"page ([1-9][0-9]*)", location)
+    link = _signed_link(source, _PDF) if page else None
+    if link is None or page is None:
+        return None
+    base_url, uri, signature = link
     params = {"asset": quote(uri), "sig": signature, "page": page[1]}
     if title:
         # Display-only; not covered by the signature.
         params["title"] = title
-    query = urlencode(params)
-    return f"{base_url}{ASSET_ROUTE}/view?{query}"
+    return f"{base_url}{ASSET_ROUTE}/view-pdf?{urlencode(params)}"
+
+
+def video_embed_url(
+    *,
+    video_file: str | None,
+    video_url: str | None,
+    start: float,
+    title: str | None = None,
+) -> str | None:
+    """The sidebar URL of a video citation, playing from `start` seconds."""
+    if video_url:
+        return kinescope_embed_url(video_url, start)
+    link = _signed_link(video_file, _VIDEO) if video_file else None
+    if link is None:
+        return None
+    base_url, uri, signature = link
+    params = {"asset": quote(uri), "sig": signature, "t": str(int(start))}
+    if title:
+        # Display-only; not covered by the signature.
+        params["title"] = title
+    return f"{base_url}{ASSET_ROUTE}/view-video?{urlencode(params)}"
 
 
 def signature_valid(secret: str | None, path: str, signature: str | None) -> bool:
@@ -75,15 +118,24 @@ def signature_valid(secret: str | None, path: str, signature: str | None) -> boo
     return hmac.compare_digest(expected, signature)
 
 
-@router.get(f"{ASSET_ROUTE}/view")
-def view() -> HTMLResponse:
+def _viewer(page: Path) -> HTMLResponse:
     return HTMLResponse(
-        _VIEWER.read_text(encoding="utf-8"),
+        page.read_text(encoding="utf-8"),
         headers={
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get(f"{ASSET_ROUTE}/view-pdf")
+def view_pdf() -> HTMLResponse:
+    return _viewer(_PDF_VIEWER)
+
+
+@router.get(f"{ASSET_ROUTE}/view-video")
+def view_video() -> HTMLResponse:
+    return _viewer(_VIDEO_VIEWER)
 
 
 @router.get(f"{ASSET_ROUTE}/files/{{file_path:path}}")
@@ -99,7 +151,7 @@ def asset_file(file_path: str, request: Request) -> FileResponse:
         raise HTTPException(status_code=404)
     return FileResponse(
         path,
-        media_type="application/pdf",
+        media_type=_MEDIA_TYPES[path.suffix.lower()],
         headers={
             "Access-Control-Allow-Origin": "null",
             "Access-Control-Expose-Headers": "Accept-Ranges, Content-Range",

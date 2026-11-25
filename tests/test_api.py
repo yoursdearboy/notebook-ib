@@ -1,3 +1,4 @@
+import json
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
@@ -33,7 +34,7 @@ def test_pdf_citation_embeds_the_full_document_at_the_cited_page(tmp_path, monke
     citation = _source_event(reference)["data"]
     url = urlsplit(citation["source"].get("embed_url", ""))
     assert url.netloc == "chat.example.com"
-    assert url.path == "/citation-assets/view"
+    assert url.path == "/citation-assets/view-pdf"
     args = parse_qs(url.query)
     assert args["page"] == ["2"]
     assert args["asset"] == ["/citation-assets/files/source%20notes.pdf"]
@@ -119,3 +120,76 @@ def test_title_names_the_citation_and_the_viewer_link(tmp_path, monkeypatch):
     assert citation["source"]["name"] == "Annual report"
     args = parse_qs(urlsplit(citation["source"]["embed_url"]).query)
     assert args["title"] == ["Annual report"]
+
+
+def video_reference(tmp_path, **metadata):
+    return build_references(
+        [
+            Document(
+                page_content="Cited words",
+                metadata={"source": "lec.vtt", "start": 100.0, **metadata},
+            )
+        ]
+    )[0]
+
+
+def test_local_video_citation_embeds_the_video_viewer(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
+    monkeypatch.setenv("NOTEBOOK_ASSETS_BASE_URL", "https://chat.example.com")
+    monkeypatch.setenv("NOTEBOOK_ASSETS_LINK_SECRET", "test-only")
+    (tmp_path / "lec.mp4").write_bytes(b"video")
+
+    source = _source_event(video_reference(tmp_path, video_file="lec.mp4"))["data"][
+        "source"
+    ]
+
+    assert source["name"] == "Video"
+    url = urlsplit(source["embed_url"])
+    assert url.path == "/citation-assets/view-video"
+    assert parse_qs(url.query)["t"] == ["100"]
+
+
+def test_video_citation_with_a_missing_file_is_a_text_citation(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTEBOOK_ASSETS_ROOT", str(tmp_path))
+    monkeypatch.setenv("NOTEBOOK_ASSETS_BASE_URL", "https://chat.example.com")
+    monkeypatch.setenv("NOTEBOOK_ASSETS_LINK_SECRET", "test-only")
+
+    event = _source_event(video_reference(tmp_path, video_file="gone.mp4"))
+
+    assert "embed_url" not in event["data"]["source"]
+    assert event["data"]["document"] == ["Cited words"]
+
+
+def test_model_start_reaches_the_kinescope_embed_url(tmp_path):
+    document = Document(
+        page_content="Cited words",
+        metadata={
+            "source": "lec.vtt",
+            "start": 100.0,
+            "video_url": "https://kinescope.io/abc123",
+        },
+    )
+
+    class Graph:
+        def invoke(self, state):
+            return {"answer": "Yes [1]", "documents": [document], "starts": {1: 70.0}}
+
+    app = create_app(Config())
+    app.state.graph = Graph()
+    response = TestClient(app).post(
+        "/v1/chat/completions",
+        json={
+            "model": "notebook-rag",
+            "stream": True,
+            "messages": [{"role": "user", "content": "Question?"}],
+        },
+    )
+
+    events = [
+        json.loads(line[6:])["event"]
+        for line in response.text.splitlines()
+        if line.startswith("data: {") and '"event"' in line
+    ]
+    assert events[0]["data"]["source"]["embed_url"] == (
+        "https://kinescope.io/embed/abc123?t=70&autoplay=1"
+    )

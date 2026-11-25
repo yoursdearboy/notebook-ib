@@ -12,7 +12,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 __all__ = ["ExtractiveChatModel", "init_chat_model"]
 
 _EVIDENCE = re.compile(
-    r"^\[(\d+)\] Source: [^\n]*\n(?:Evidence text:\n)?(.*?)(?=\n\n\[\d+\] Source: |\Z)",
+    r"^\[(\d+)\] Source: [^\n]*\n(?:Preceding transcript:\n(?:c\d+ [^\n]*\n)+)?(?:Evidence text:\n)?(.*?)(?=\n\n\[\d+\] Source: |\Z)",
     re.DOTALL | re.MULTILINE,
 )
 

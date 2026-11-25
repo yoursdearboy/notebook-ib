@@ -73,11 +73,17 @@ def _create_parser() -> argparse.ArgumentParser:
         "index", help="Index a file or recursively scan a directory"
     )
     index_parser.add_argument(
-        "path", type=Path, help="Text, Markdown, PDF, or directory of supported files"
+        "path",
+        type=Path,
+        help="Text, Markdown, PDF, WebVTT transcript, or directory of supported files",
     )
     index_parser.add_argument(
         "--title",
         help="Display title for the document, shown in references (single file only)",
+    )
+    index_parser.add_argument(
+        "--video-url",
+        help="Kinescope URL of the video for a .vtt transcript (single file only)",
     )
     ask_parser = commands.add_parser(
         "ask", help="Ask a question about indexed documents"
@@ -107,7 +113,12 @@ def main(argv: list[str] | None = None) -> int:
             embeddings = init_embeddings(config.embedding_model)
             store = IndexStore(config, embeddings)
             failures = index_path(
-                args.path, config, store, embeddings, title=args.title
+                args.path,
+                config,
+                store,
+                embeddings,
+                title=args.title,
+                video_url=args.video_url,
             )
             return 1 if failures else 0
 

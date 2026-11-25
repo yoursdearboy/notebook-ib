@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from langchain.embeddings import init_embeddings
 from pydantic import BaseModel, ConfigDict
 
-from notebook.asset_citations import asset_embed_url
+from notebook.asset_citations import asset_embed_url, video_embed_url
 from notebook.config import Config
 from notebook.models import init_chat_model
 from notebook.rag import IndexStore, Reference, build_graph, build_references
@@ -81,9 +81,22 @@ def _completion(completion_id: str, created: int, answer: str) -> dict[str, Any]
 def _source_event(reference: Reference) -> dict[str, Any]:
     """An Open WebUI citation event; one per chunk so [n] markers line up."""
     path = reference["path"]
-    title = reference["title"] or f"{Path(path).name} ({reference['location']})"
+    if reference["start"] is not None:
+        # Video headers carry no file name or time; the viewer opens at the time.
+        title = reference["title"] or "Video"
+    else:
+        title = reference["title"] or f"{Path(path).name} ({reference['location']})"
     source = {"id": f"{path}#{reference['index']}", "name": title}
-    if embed_url := asset_embed_url(path, reference["location"], reference["title"]):
+    if reference["start"] is not None:
+        embed_url = video_embed_url(
+            video_file=reference["video_file"],
+            video_url=reference["video_url"],
+            start=reference["start"],
+            title=reference["title"],
+        )
+    else:
+        embed_url = asset_embed_url(path, reference["location"], reference["title"])
+    if embed_url:
         source["embed_url"] = embed_url
     return {
         "type": "source",
@@ -172,7 +185,9 @@ def create_app(config: Config | None = None) -> FastAPI:
             # Open WebUI shows references as citations, so they are sent as
             # events rather than appended to the answer text.
             answer = state["answer"]
-            references = build_references(state.get("documents", []))
+            references = build_references(
+                state.get("documents", []), state.get("starts")
+            )
         except Exception as exc:
             logger.exception("RAG request failed")
             # Surface errors (e.g. "index not initialized") in the chat itself.

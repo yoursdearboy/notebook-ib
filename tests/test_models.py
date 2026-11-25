@@ -30,3 +30,18 @@ def test_extractive_model_truncates_long_passages() -> None:
     answer = ExtractiveChatModel(max_chars=20).invoke(prompt).text
 
     assert answer.endswith("… [1]")
+
+
+def test_extractive_model_skips_the_preceding_transcript_of_a_video_chunk() -> None:
+    prompt = [
+        HumanMessage(
+            content="[1] Source: lec (video 1:40)\n"
+            "Preceding transcript:\nc3 [1:10] earlier words\n"
+            "Evidence text:\nc5 [1:40] cited words\n\n"
+            "[2] Source: b.txt (lines 1-1)\nEvidence text:\nOther."
+        )
+    ]
+
+    answer = ExtractiveChatModel().invoke(prompt).text
+
+    assert answer == "c5 [1:40] cited words [1]"

@@ -437,3 +437,37 @@ def test_config_reads_rag_database_url_not_database_url() -> None:
     assert Config.from_env({"RAG_DATABASE_URL": url}).database_url == url
     ignored = Config.from_env({"DATABASE_URL": "sqlite:///webui.db"})
     assert ignored.database_url == Config().database_url
+
+
+def test_video_url_with_a_directory_fails_before_indexing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch)
+    (tmp_path / "a.txt").write_text("A known fact.\n", encoding="utf-8")
+    store = FakeStore()
+    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+
+    result = app.main(
+        ["index", str(tmp_path), "--video-url", "https://kinescope.io/abc123"]
+    )
+
+    assert result == 1
+    assert store.replacements == []
+
+
+def test_video_url_is_passed_to_index_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    set_config_env(monkeypatch)
+    vtt = tmp_path / "lec.vtt"
+    vtt.write_text("WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nhello there.\n")
+    store = FakeStore()
+    monkeypatch.setattr(app, "init_embeddings", lambda model: FakeEmbeddings())
+    monkeypatch.setattr(app, "IndexStore", lambda config, embeddings: store)
+
+    result = app.main(["index", str(vtt), "--video-url", "https://kinescope.io/abc123"])
+
+    assert result == 0
+    chunks, _ = store.replacements[0]
+    assert chunks[0].metadata["video_url"] == "https://kinescope.io/abc123"
